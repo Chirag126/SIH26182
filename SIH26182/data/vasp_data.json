@@ -1,0 +1,36 @@
+[
+  {
+    "vasp": "VASP-C",
+    "type": "centralized_exchange",
+    "hot_wallets": [
+      "0xHOT456"
+    ],
+    "deposit_addresses": [
+      "0xDEP123",
+      "0xDEP999"
+    ],
+    "source": "CONTROLLED DEMO INTELLIGENCE"
+  },
+  {
+    "vasp": "VASP-A",
+    "type": "centralized_exchange",
+    "hot_wallets": [
+      "0xHOTA111"
+    ],
+    "deposit_addresses": [
+      "0xDEPA111"
+    ],
+    "source": "CONTROLLED DEMO INTELLIGENCE"
+  },
+  {
+    "vasp": "VASP-B",
+    "type": "centralized_exchange",
+    "hot_wallets": [
+      "0xHOTB222"
+    ],
+    "deposit_addresses": [
+      "0xDEPB222"
+    ],
+    "source": "CONTROLLED DEMO INTELLIGENCE"
+  }
+]

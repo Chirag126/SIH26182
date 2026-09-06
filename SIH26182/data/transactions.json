@@ -1,0 +1,108 @@
+[
+  {
+    "tx_hash": "TX001",
+    "from": "0xABC",
+    "to": "0x001",
+    "amount": 2.5,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX002",
+    "from": "0x001",
+    "to": "0x021",
+    "amount": 1.0,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX003",
+    "from": "0x001",
+    "to": "0x035",
+    "amount": 0.8,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX004",
+    "from": "0x001",
+    "to": "0x078",
+    "amount": 0.7,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX005",
+    "from": "0x021",
+    "to": "0xDEP123",
+    "amount": 0.9,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX006",
+    "from": "0x035",
+    "to": "0xDEP123",
+    "amount": 0.7,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX007",
+    "from": "0x078",
+    "to": "0xDEP123",
+    "amount": 0.6,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX008",
+    "from": "0xDEP123",
+    "to": "0xHOT456",
+    "amount": 2.2,
+    "chain": "Ethereum"
+  },
+
+  {
+    "tx_hash": "TX101",
+    "from": "0xMIXABC",
+    "to": "0x701",
+    "amount": 3.0,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX102",
+    "from": "0x701",
+    "to": "MIXER",
+    "amount": 3.0,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX103",
+    "from": "MIXER",
+    "to": "0x702",
+    "amount": 2.8,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX104",
+    "from": "0x702",
+    "to": "BRIDGE",
+    "amount": 2.5,
+    "chain": "Ethereum"
+  },
+  {
+    "tx_hash": "TX105",
+    "from": "BRIDGE",
+    "to": "0xDEST789",
+    "amount": 2.4,
+    "chain": "Polygon"
+  },
+  {
+    "tx_hash": "TX106",
+    "from": "0xDEST789",
+    "to": "0xDEP999",
+    "amount": 2.3,
+    "chain": "Polygon"
+  },
+  {
+    "tx_hash": "TX107",
+    "from": "0xDEP999",
+    "to": "0xHOT456",
+    "amount": 2.2,
+    "chain": "Polygon"
+  }
+]

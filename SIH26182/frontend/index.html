@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryptoTrace AI</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<header>
+    <div>
+        <h1>CryptoTrace AI</h1>
+        <p>Automated Cryptocurrency Investigation & VASP Attribution</p>
+    </div>
+
+    <div class="status">
+        ● <span id="dataSource">SYSTEM ONLINE</span>
+    </div>
+</header>
+
+<main>
+
+    <section class="search-card">
+
+        <h2>Investigate Wallet</h2>
+
+        <div class="scenario-box">
+
+            <label>Investigation Scenario</label>
+
+            <select id="scenarioSelect" onchange="changeScenario()">
+
+                <option value="normal">
+                    Normal Scam Flow
+                </option>
+
+                <option value="difficult">
+                    Mixer + Cross-Chain Bridge
+                </option>
+
+            </select>
+
+        </div>
+
+            <label>Suspicious Wallet Address</label>
+
+        <div class="search-box">
+            <input
+                id="walletInput"
+                type="text"
+                value="0xABC"
+                placeholder="Enter wallet address"
+            >
+
+            <button onclick="startInvestigation()">
+                TRACE FUNDS
+            </button>
+        </div>
+
+    </section>
+
+
+    <section id="results" class="hidden">
+
+        <div class="stats">
+
+            <div class="stat-card">
+                <span>Transactions</span>
+                <strong id="txCount">0</strong>
+            </div>
+
+            <div class="stat-card">
+                <span>Addresses Traced</span>
+                <strong id="addressCount">0</strong>
+            </div>
+
+            <div class="stat-card">
+                <span>Clusters</span>
+                <strong id="clusterCount">0</strong>
+            </div>
+
+            <div class="stat-card">
+                <span>Trace Status</span>
+                <strong id="traceStatus">--</strong>
+            </div>
+
+        </div>
+
+
+        <div class="graph-card">
+
+            <div class="card-header">
+                <h2>Transaction Graph</h2>
+                <span id="graphStatus">Analyzing...</span>
+            </div>
+
+            <div id="graph"></div>
+
+        </div>
+
+
+        <div class="analysis-grid">
+
+            <div class="analysis-card">
+
+                <h2>Detected Intelligence</h2>
+
+                <div class="finding">
+                    ✓ Address Cluster Detected
+                </div>
+
+                <div class="finding">
+                    ✓ Candidate Deposit Address
+                </div>
+
+                <div class="finding">
+                    ✓ Sweep Pattern Detected
+                </div>
+
+                <div class="finding warning">
+                    ⚠ Further Attribution Required
+                </div>
+
+            </div>
+
+
+            <div class="analysis-card attribution">
+
+                <h2>VASP Attribution</h2>
+
+                <div class="vasp-name">
+                    VASP-C
+                </div>
+
+                <div class="confidence">
+                    <strong>82%</strong>
+                    <span>Confidence</span>
+                </div>
+
+                <div class="progress">
+                    <div id="confidenceBar"></div>
+                </div>
+
+                <div id="confidenceExplanation" 
+                    class="confidence-explanation">
+                </div>
+
+                <button onclick="generateReport()">
+                    GENERATE EVIDENCE REPORT
+                </button>
+
+            </div>
+
+        </div>
+
+
+<div id="report" class="report hidden">
+
+    <h2>Investigation Evidence Report</h2>
+
+    <div class="report-grid">
+
+        <div>
+            <span>Investigated Wallet</span>
+            <strong id="reportWallet">--</strong>
+        </div>
+
+        <div>
+            <span>Candidate VASP</span>
+            <strong id="reportVasp">--</strong>
+        </div>
+
+        <div>
+            <span>Confidence</span>
+            <strong id="reportConfidence">--</strong>
+        </div>
+
+        <div>
+            <span>Transactions</span>
+            <strong id="reportTransactions">--</strong>
+        </div>
+
+    </div>
+
+
+    <h3>Evidence Chain</h3>
+
+    <div id="evidenceChain" class="evidence-chain">
+        --
+    </div>
+
+
+    <h3>Detected Intelligence</h3>
+
+    <div id="reportFindings"></div>
+
+    <div class="report-evidence">
+        <strong>Matched VASP Infrastructure</strong>
+        <div id="matchedVaspAddrresses">No infrastructure matched</div>
+    </div>
+
+    <div class="report-evidence">
+        <strong>Attribution Basis</strong>
+        <div id="reportBasis">
+            Transaction behavior + external blockchain intelligence
+        </div>
+    </div>
+</div>
+
+<div class="report-evidence">
+    <strong>Intelligence Source</strong>
+    <div id="reportSource">
+        Live blockchain data + external VASP intelligence
+    </div>
+</div>
+
+<div class="report-evidence">
+    <strong>Risk Modifiers</strong>
+    <div id="reportRisk">
+        No additional uncertainty detected
+    </div>
+</div>
+
+
+    <h3>Transaction Evidence</h3>
+
+    <div id="transactionEvidence"></div>
+
+
+    <div class="report-footer">
+
+        <strong>Investigation Status:</strong>
+
+        <span id="reportStatus">
+            Candidate Attribution
+        </span>
+
+        <p>
+            This report represents an evidence-backed attribution
+            candidate based on observable blockchain activity and
+            available intelligence. It does not independently establish
+            the identity of a person or prove ownership.
+        </p>
+
+    </div>
+
+</div>
+
+    </section>
+
+</main>
+
+<script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
+
