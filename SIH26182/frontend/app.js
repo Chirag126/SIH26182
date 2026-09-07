@@ -28,13 +28,9 @@ function changeScenario() {
         document.getElementById("walletInput");
 
         if (scenario === "real") {
-            walletInput.value = "";
-            walletInput.placeholder = "Enter a real crypto address";
-            walletInput.focus();
-        } else {
             walletInput.value = scenarios[scenario].wallet;
-            walletInput.placeholder = "Enter wallet address";
-        }
+            walletInput.placeholder = "Real wallet address";
+        }    
 }
 
 
