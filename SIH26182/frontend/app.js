@@ -10,7 +10,7 @@ const scenarios = {
     },
 
     real: {
-        wallet: ""
+        wallet: "0x8EB8fd3df2F6203C17e9B9218FB5b5B309344c13"
     }
 };
 
