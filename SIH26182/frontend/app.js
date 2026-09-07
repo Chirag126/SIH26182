@@ -7,6 +7,10 @@ const scenarios = {
 
     difficult: {
         wallet: "0xMIXABC"
+    },
+
+    real: {
+        wallet: ""
     }
 };
 
@@ -20,8 +24,17 @@ function changeScenario() {
     const scenario =
         document.getElementById("scenarioSelect").value;
 
-    document.getElementById("walletInput").value =
-        scenarios[scenario].wallet;
+    const walletInput =
+        document.getElementById("walletInput");
+
+        if (scenario === "real") {
+            walletInput.value = "";
+            walletInput.placeholder = "Enter a real crypto address";
+            walletInput.focus();
+        } else {
+            walletInput.value = scenarios[scenario].wallet;
+            walletInput.placeholder = "Enter wallet address";
+        }
 }
 
 
