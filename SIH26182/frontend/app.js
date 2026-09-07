@@ -30,7 +30,10 @@ function changeScenario() {
         if (scenario === "real") {
             walletInput.value = scenarios[scenario].wallet;
             walletInput.placeholder = "Real wallet address";
-        }    
+        } else {
+            walletInput.value = scenarios[scenario].wallet;
+            walletInput.placeholder =  "Real wallet address";
+        }  
 }
 
 
