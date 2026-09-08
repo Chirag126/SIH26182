@@ -7,7 +7,10 @@ import os
 import requests
 from dotenv import load_dotenv
 
-from backend.heuristics import (analyze_transactions,calculate_live_confidence,detect_live_behavioral_clusters)
+from backend.heuristics import (analyze_transactions,
+                                calculate_live_confidence,
+                                detect_live_behavioral_clusters,
+                                detect_live_deposit_addresses)
 
 load_dotenv()
 
@@ -523,16 +526,11 @@ def investigate(wallet: str):
                 len(traced_transactions),
             "address_count":
                 len(addresses),
-            "cluster_count":
-                (
-                    1
-                    if intelligence[
-                        "cluster_size"
-                    ]
-                    else 0
-                ),
-            "intelligence":
-                intelligence
+            "cluster_count": live_clusters["count"],
+            "behavioral_clusters": live_clusters,
+            "deposit_analysis": live_deposits,
+            "intelligence": intelligence
+                
         }
 
     try:
@@ -549,6 +547,11 @@ def investigate(wallet: str):
         live_clusters = detect_live_behavioral_clusters(
             transactions,
             wallet
+        )
+
+        live_deposits = detect_live_deposit_addresses(
+            transactions,
+            start_wallet=wallet
         )
 
         intelligence_results = []

@@ -355,316 +355,6 @@ def analyze_transactions(transactions, vasp_data):
             bridge_detected
     }
 
-def detect_live_behavioral_clusters(
-    transactions,
-    start_wallet
-):
-    """
-    Detect behavioural relationships between addresses
-    for REAL wallet investigations.
-
-    This is an analytical relationship score, not proof
-    of common ownership.
-    """
-
-    start_wallet = str(
-        start_wallet
-    ).lower()
-
-    # --------------------------------------------------
-    # Build address relationships
-    # --------------------------------------------------
-
-    incoming_from = {}
-    outgoing_to = {}
-
-    for tx in transactions:
-
-        sender = str(
-            tx.get("from", "")
-        ).lower()
-
-        receiver = str(
-            tx.get("to", "")
-        ).lower()
-
-        if not sender or not receiver:
-            continue
-
-        outgoing_to.setdefault(
-            sender,
-            set()
-        ).add(receiver)
-
-        incoming_from.setdefault(
-            receiver,
-            set()
-        ).add(sender)
-
-    # --------------------------------------------------
-    # Build behavioural relationships
-    # --------------------------------------------------
-
-    relationships = []
-
-    addresses = set(
-        outgoing_to.keys()
-    ).union(
-        incoming_from.keys()
-    )
-
-    addresses.discard(
-        start_wallet
-    )
-
-    address_list = list(addresses)
-
-    for i in range(
-        len(address_list)
-    ):
-
-        address_a = address_list[i]
-
-        for j in range(
-            i + 1,
-            len(address_list)
-        ):
-
-            address_b = address_list[j]
-
-            score = 0
-            reasons = []
-
-            # ------------------------------------------
-            # Shared destination
-            # ------------------------------------------
-
-            destinations_a = outgoing_to.get(
-                address_a,
-                set()
-            )
-
-            destinations_b = outgoing_to.get(
-                address_b,
-                set()
-            )
-
-            shared_destinations = (
-                destinations_a.intersection(
-                    destinations_b
-                )
-            )
-
-            if shared_destinations:
-
-                score += 3
-
-                reasons.append(
-                    "shared destination"
-                )
-
-            # ------------------------------------------
-            # Shared funding source
-            # ------------------------------------------
-
-            funders_a = incoming_from.get(
-                address_a,
-                set()
-            )
-
-            funders_b = incoming_from.get(
-                address_b,
-                set()
-            )
-
-            shared_funders = (
-                funders_a.intersection(
-                    funders_b
-                )
-            )
-
-            if shared_funders:
-
-                score += 3
-
-                reasons.append(
-                    "shared funding source"
-                )
-
-            # ------------------------------------------
-            # Direct interaction
-            # ------------------------------------------
-
-            if (
-                address_b
-                in destinations_a
-            ):
-
-                score += 4
-
-                reasons.append(
-                    "direct transaction relationship"
-                )
-
-            if (
-                address_a
-                in destinations_b
-            ):
-
-                score += 4
-
-                reasons.append(
-                    "direct transaction relationship"
-                )
-
-            # ------------------------------------------
-            # Only consider meaningful relationships
-            # ------------------------------------------
-
-            if score >= 3:
-
-                relationships.append({
-                    "address_a":
-                        address_a,
-
-                    "address_b":
-                        address_b,
-
-                    "score":
-                        score,
-
-                    "reasons":
-                        reasons
-                })
-
-    # --------------------------------------------------
-    # Build connected clusters
-    # --------------------------------------------------
-
-    graph = {}
-
-    for relationship in relationships:
-
-        address_a = relationship[
-            "address_a"
-        ]
-
-        address_b = relationship[
-            "address_b"
-        ]
-
-        graph.setdefault(
-            address_a,
-            set()
-        ).add(address_b)
-
-        graph.setdefault(
-            address_b,
-            set()
-        ).add(address_a)
-
-    clusters = []
-
-    visited = set()
-
-    for address in graph:
-
-        if address in visited:
-            continue
-
-        queue = [address]
-        cluster = set()
-
-        while queue:
-
-            current = queue.pop()
-
-            if current in visited:
-                continue
-
-            visited.add(current)
-            cluster.add(current)
-
-            for neighbour in graph.get(
-                current,
-                set()
-            ):
-
-                if neighbour not in visited:
-                    queue.append(
-                        neighbour
-                    )
-
-        if len(cluster) >= 2:
-
-            clusters.append(
-                sorted(cluster)
-            )
-
-    # --------------------------------------------------
-    # Generate cluster evidence
-    # --------------------------------------------------
-
-    cluster_results = []
-
-    for index, cluster in enumerate(
-        clusters,
-        start=1
-    ):
-
-        cluster_relationships = [
-            relationship
-            for relationship in relationships
-            if (
-                relationship["address_a"]
-                in cluster
-                and
-                relationship["address_b"]
-                in cluster
-            )
-        ]
-
-        reasons = []
-
-        for relationship in (
-            cluster_relationships
-        ):
-
-            for reason in relationship[
-                "reasons"
-            ]:
-
-                if reason not in reasons:
-
-                    reasons.append(
-                        reason
-                    )
-
-        relationship_strength = sum(
-            relationship["score"]
-            for relationship
-            in cluster_relationships
-        )
-
-        cluster_results.append({
-            "cluster_id":
-                index,
-
-            "addresses":
-                cluster,
-
-            "size":
-                len(cluster),
-
-            "relationship_strength":
-                relationship_strength,
-
-            "reasons":
-                reasons
-        })
-
-    return cluster_results
-
 def calculate_live_confidence(
     transactions,
     addresses,
@@ -951,4 +641,262 @@ def calculate_live_confidence(
             "external-intelligence evidence. "
             "Mixer and bridge activity reduce the score."
         )
+    }
+
+def detect_live_behavioral_clusters(
+    transactions,
+    start_wallet=None
+):
+    """
+    Detect behaviorally related live-wallet addresses.
+
+    The method compares address behavior using:
+    - shared counterparties
+    - shared funding sources
+    - repeated interaction patterns
+
+    It does NOT rely on demo address prefixes or VASP registry data.
+    """
+
+    outgoing = {}
+    incoming = {}
+
+    for tx in transactions:
+        sender = str(tx.get("from", "")).lower()
+        receiver = str(tx.get("to", "")).lower()
+
+        if not sender or not receiver:
+            continue
+
+        outgoing.setdefault(sender, set()).add(receiver)
+        incoming.setdefault(receiver, set()).add(sender)
+
+    addresses = set(outgoing) | set(incoming)
+
+    if start_wallet:
+        addresses.add(start_wallet.lower())
+
+    relationships = []
+
+    address_list = sorted(addresses)
+
+    for i in range(len(address_list)):
+        a = address_list[i]
+
+        for j in range(i + 1, len(address_list)):
+            b = address_list[j]
+
+            score = 0
+            reasons = []
+
+            # Shared destinations
+            shared_destinations = (
+                outgoing.get(a, set())
+                & outgoing.get(b, set())
+            )
+
+            if shared_destinations:
+                score += len(shared_destinations)
+                reasons.append(
+                    f"shared destinations: {len(shared_destinations)}"
+                )
+
+            # Shared funding sources
+            shared_sources = (
+                incoming.get(a, set())
+                & incoming.get(b, set())
+            )
+
+            if shared_sources:
+                score += len(shared_sources)
+                reasons.append(
+                    f"shared funding sources: {len(shared_sources)}"
+                )
+
+            # Repeated direct interaction
+            direct_interaction = (
+                b in outgoing.get(a, set())
+                or a in outgoing.get(b, set())
+            )
+
+            if direct_interaction:
+                score += 1
+                reasons.append("direct interaction")
+
+            if score >= 2:
+                relationships.append({
+                    "a": a,
+                    "b": b,
+                    "score": score,
+                    "reasons": reasons
+                })
+
+    # Build connected components
+    graph = {}
+
+    for relation in relationships:
+        a = relation["a"]
+        b = relation["b"]
+
+        graph.setdefault(a, set()).add(b)
+        graph.setdefault(b, set()).add(a)
+
+    visited = set()
+    clusters = []
+
+    for address in graph:
+
+        if address in visited:
+            continue
+
+        stack = [address]
+        component = set()
+
+        while stack:
+            current = stack.pop()
+
+            if current in visited:
+                continue
+
+            visited.add(current)
+            component.add(current)
+
+            for neighbour in graph.get(current, set()):
+                if neighbour not in visited:
+                    stack.append(neighbour)
+
+        if len(component) >= 2:
+            cluster_relationships = [
+                r for r in relationships
+                if r["a"] in component
+                and r["b"] in component
+            ]
+
+            clusters.append({
+                "cluster_id": len(clusters) + 1,
+                "addresses": sorted(component),
+                "size": len(component),
+                "relationship_strength": sum(
+                    r["score"]
+                    for r in cluster_relationships
+                ),
+                "relationships": cluster_relationships
+            })
+
+    return {
+        "count": len(clusters),
+        "clusters": clusters,
+        "addresses": sorted(addresses)
+    }
+
+def detect_live_deposit_addresses(
+    transactions,
+    start_wallet=None
+):
+    """
+    Detect addresses that behave like deposit addresses
+    using observed transaction behavior.
+
+    Signals:
+    - multiple independent incoming senders
+    - repeated incoming transfers
+    - subsequent forwarding of received funds
+    """
+
+    incoming = {}
+    outgoing = {}
+
+    for tx in transactions:
+        sender = str(tx.get("from", "")).lower()
+        receiver = str(tx.get("to", "")).lower()
+
+        if not sender or not receiver:
+            continue
+
+        incoming.setdefault(receiver, []).append(tx)
+        outgoing.setdefault(sender, []).append(tx)
+
+    candidates = []
+
+    for address, received_txs in incoming.items():
+
+        # Don't classify the investigated wallet itself
+        # as its own deposit address.
+        if start_wallet and address == start_wallet.lower():
+            continue
+
+        senders = {
+            str(tx.get("from", "")).lower()
+            for tx in received_txs
+            if tx.get("from")
+        }
+
+        incoming_count = len(received_txs)
+        unique_senders = len(senders)
+
+        forwarded_txs = outgoing.get(address, [])
+
+        # A deposit address generally receives funds and
+        # subsequently forwards funds.
+        forwarding = len(forwarded_txs)
+
+        if incoming_count == 0:
+            continue
+
+        # Behavioral components
+        sender_diversity = (
+            unique_senders / incoming_count
+        )
+
+        forwarding_ratio = (
+            min(forwarding / incoming_count, 1.0)
+        )
+
+        repeat_incoming = (
+            min((incoming_count - 1) / incoming_count, 1.0)
+        )
+
+        # Combine observed behavioral signals.
+        behavior_score = (
+            sender_diversity
+            + forwarding_ratio
+            + repeat_incoming
+        ) / 3
+
+        # Require evidence of actual deposit-like activity.
+        if (
+            unique_senders >= 2
+            and forwarding >= 1
+        ):
+            candidates.append({
+                "address": address,
+                "incoming_count": incoming_count,
+                "unique_senders": unique_senders,
+                "forwarding_count": forwarding,
+                "sender_diversity": round(
+                    sender_diversity,
+                    4
+                ),
+                "forwarding_ratio": round(
+                    forwarding_ratio,
+                    4
+                ),
+                "repeat_incoming": round(
+                    repeat_incoming,
+                    4
+                ),
+                "behavior_score": round(
+                    behavior_score,
+                    4
+                )
+            })
+
+    candidates.sort(
+        key=lambda item: item["behavior_score"],
+        reverse=True
+    )
+
+    return {
+        "count": len(candidates),
+        "candidates": candidates
     }
