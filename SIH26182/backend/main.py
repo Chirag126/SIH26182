@@ -7,7 +7,7 @@ import os
 import requests
 from dotenv import load_dotenv
 
-from backend.heuristics import (analyze_transactions,calculate_live_confidence)
+from backend.heuristics import (analyze_transactions,calculate_live_confidence,detect_live_behavioral_clusters)
 
 load_dotenv()
 
@@ -545,6 +545,12 @@ def investigate(wallet: str):
                 chain_id="1"
             )
         )
+
+        live_clusters = detect_live_behavioral_clusters(
+            transactions,
+            wallet
+        )
+
         intelligence_results = []
 
         try:
@@ -599,6 +605,18 @@ def investigate(wallet: str):
                 []
             )
         )
+
+        intelligence[
+            "behavioral_clusters"
+        ] = live_clusters
+
+        intelligence[
+            "cluster_size"
+        ] = sum(
+            cluster["size"]
+            for cluster
+            in live_clusters
+        )        
 
         if external_vasp_matches:
 

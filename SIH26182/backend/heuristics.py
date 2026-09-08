@@ -355,6 +355,316 @@ def analyze_transactions(transactions, vasp_data):
             bridge_detected
     }
 
+def detect_live_behavioral_clusters(
+    transactions,
+    start_wallet
+):
+    """
+    Detect behavioural relationships between addresses
+    for REAL wallet investigations.
+
+    This is an analytical relationship score, not proof
+    of common ownership.
+    """
+
+    start_wallet = str(
+        start_wallet
+    ).lower()
+
+    # --------------------------------------------------
+    # Build address relationships
+    # --------------------------------------------------
+
+    incoming_from = {}
+    outgoing_to = {}
+
+    for tx in transactions:
+
+        sender = str(
+            tx.get("from", "")
+        ).lower()
+
+        receiver = str(
+            tx.get("to", "")
+        ).lower()
+
+        if not sender or not receiver:
+            continue
+
+        outgoing_to.setdefault(
+            sender,
+            set()
+        ).add(receiver)
+
+        incoming_from.setdefault(
+            receiver,
+            set()
+        ).add(sender)
+
+    # --------------------------------------------------
+    # Build behavioural relationships
+    # --------------------------------------------------
+
+    relationships = []
+
+    addresses = set(
+        outgoing_to.keys()
+    ).union(
+        incoming_from.keys()
+    )
+
+    addresses.discard(
+        start_wallet
+    )
+
+    address_list = list(addresses)
+
+    for i in range(
+        len(address_list)
+    ):
+
+        address_a = address_list[i]
+
+        for j in range(
+            i + 1,
+            len(address_list)
+        ):
+
+            address_b = address_list[j]
+
+            score = 0
+            reasons = []
+
+            # ------------------------------------------
+            # Shared destination
+            # ------------------------------------------
+
+            destinations_a = outgoing_to.get(
+                address_a,
+                set()
+            )
+
+            destinations_b = outgoing_to.get(
+                address_b,
+                set()
+            )
+
+            shared_destinations = (
+                destinations_a.intersection(
+                    destinations_b
+                )
+            )
+
+            if shared_destinations:
+
+                score += 3
+
+                reasons.append(
+                    "shared destination"
+                )
+
+            # ------------------------------------------
+            # Shared funding source
+            # ------------------------------------------
+
+            funders_a = incoming_from.get(
+                address_a,
+                set()
+            )
+
+            funders_b = incoming_from.get(
+                address_b,
+                set()
+            )
+
+            shared_funders = (
+                funders_a.intersection(
+                    funders_b
+                )
+            )
+
+            if shared_funders:
+
+                score += 3
+
+                reasons.append(
+                    "shared funding source"
+                )
+
+            # ------------------------------------------
+            # Direct interaction
+            # ------------------------------------------
+
+            if (
+                address_b
+                in destinations_a
+            ):
+
+                score += 4
+
+                reasons.append(
+                    "direct transaction relationship"
+                )
+
+            if (
+                address_a
+                in destinations_b
+            ):
+
+                score += 4
+
+                reasons.append(
+                    "direct transaction relationship"
+                )
+
+            # ------------------------------------------
+            # Only consider meaningful relationships
+            # ------------------------------------------
+
+            if score >= 3:
+
+                relationships.append({
+                    "address_a":
+                        address_a,
+
+                    "address_b":
+                        address_b,
+
+                    "score":
+                        score,
+
+                    "reasons":
+                        reasons
+                })
+
+    # --------------------------------------------------
+    # Build connected clusters
+    # --------------------------------------------------
+
+    graph = {}
+
+    for relationship in relationships:
+
+        address_a = relationship[
+            "address_a"
+        ]
+
+        address_b = relationship[
+            "address_b"
+        ]
+
+        graph.setdefault(
+            address_a,
+            set()
+        ).add(address_b)
+
+        graph.setdefault(
+            address_b,
+            set()
+        ).add(address_a)
+
+    clusters = []
+
+    visited = set()
+
+    for address in graph:
+
+        if address in visited:
+            continue
+
+        queue = [address]
+        cluster = set()
+
+        while queue:
+
+            current = queue.pop()
+
+            if current in visited:
+                continue
+
+            visited.add(current)
+            cluster.add(current)
+
+            for neighbour in graph.get(
+                current,
+                set()
+            ):
+
+                if neighbour not in visited:
+                    queue.append(
+                        neighbour
+                    )
+
+        if len(cluster) >= 2:
+
+            clusters.append(
+                sorted(cluster)
+            )
+
+    # --------------------------------------------------
+    # Generate cluster evidence
+    # --------------------------------------------------
+
+    cluster_results = []
+
+    for index, cluster in enumerate(
+        clusters,
+        start=1
+    ):
+
+        cluster_relationships = [
+            relationship
+            for relationship in relationships
+            if (
+                relationship["address_a"]
+                in cluster
+                and
+                relationship["address_b"]
+                in cluster
+            )
+        ]
+
+        reasons = []
+
+        for relationship in (
+            cluster_relationships
+        ):
+
+            for reason in relationship[
+                "reasons"
+            ]:
+
+                if reason not in reasons:
+
+                    reasons.append(
+                        reason
+                    )
+
+        relationship_strength = sum(
+            relationship["score"]
+            for relationship
+            in cluster_relationships
+        )
+
+        cluster_results.append({
+            "cluster_id":
+                index,
+
+            "addresses":
+                cluster,
+
+            "size":
+                len(cluster),
+
+            "relationship_strength":
+                relationship_strength,
+
+            "reasons":
+                reasons
+        })
+
+    return cluster_results
+
 def calculate_live_confidence(
     transactions,
     addresses,
@@ -520,10 +830,29 @@ def calculate_live_confidence(
     # stronger graph evidence.
     # --------------------------------------------------
 
-    graph_evidence = min(
-        len(wallet_addresses) / 8,
-        1.0
+    cluster_results = intelligence.get(
+    "behavioral_clusters",
+    []
     )
+
+    if cluster_results:
+
+        total_cluster_addresses = sum(
+            cluster.get(
+                "size",
+                0
+            )
+            for cluster in cluster_results
+        )
+
+        cluster_evidence = min(
+            total_cluster_addresses / 6,
+            1.0
+        )
+
+    else:
+
+        cluster_evidence = 0.0
 
     # --------------------------------------------------
     # 8. Risk factors
@@ -562,7 +891,7 @@ def calculate_live_confidence(
         deposit_evidence,
         sweep_evidence,
         external_match_evidence,
-        graph_evidence
+        cluster_evidence
     ]
 
     base_evidence = (
@@ -605,8 +934,8 @@ def calculate_live_confidence(
         "external_vasp_evidence": round(
             external_match_evidence * 100
         ),
-        "graph_evidence": round(
-            graph_evidence * 100
+        "cluster_evidence": round(
+            cluster_evidence * 100
         ),
         "risk_penalty": round(
             risk_penalty * 100
