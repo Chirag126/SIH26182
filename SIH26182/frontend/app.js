@@ -101,17 +101,20 @@ async function startInvestigation() {
         /* ---------------- STATUS ---------------- */
 
         document.getElementById("traceStatus").innerText =
-            "COMPLETE";
+            data.trace_status || "COMPLETE";
 
         document.getElementById("graphStatus").innerText =
-            "Transaction graph generated";
+            data.trace_status === "PARTIAL"
+                ? "Partial graph — some API lookups were unavailable"
+                : "Transaction graph generated";
 
 
         /* ---------------- GRAPH ---------------- */
 
         drawGraph(
             data.transactions || [],
-            wallet
+            wallet,
+            data
         );
 
 
@@ -141,25 +144,13 @@ async function startInvestigation() {
         /* ---------------- CONFIDENCE EXPLANATION ---------------- */
 
         let explanation =
-            "Confidence is based on observable transaction evidence.";
-
-        if (
-            intelligence.mixer_detected
-        ) {
-            explanation +=
-                " Mixer interaction reduced confidence.";
-        }
-
-        if (
-            intelligence.bridge_detected
-        ) {
-            explanation +=
-                " Cross-chain movement introduced additional uncertainty.";
-        }
+            intelligence.score_explanation
+            || "Confidence is based on observable transaction evidence.";
 
         if (
             candidateVasp !==
             "INCONCLUSIVE"
+            && !explanation.toLowerCase().includes("external")
         ) {
             explanation +=
                 " External service intelligence provided supporting attribution evidence.";
@@ -243,11 +234,26 @@ async function startInvestigation() {
 
 function drawGraph(
     transactions,
-    startingWallet
+    startingWallet,
+    analysisData = {}
 ) {
 
     const elements = [];
     const addedNodes = new Set();
+
+    const intelligence = analysisData.intelligence || {};
+    const depositSet = new Set(
+        (analysisData.deposit_analysis?.candidates || [])
+            .map(item => String(item.address || "").toLowerCase())
+    );
+    const hotSet = new Set(
+        (analysisData.hot_wallet_analysis?.candidates || [])
+            .map(item => String(item.address || "").toLowerCase())
+    );
+    const matchedSet = new Set(
+        (intelligence.matched_addresses || [])
+            .map(address => String(address).toLowerCase())
+    );
 
 
     /* -----------------------------------------------------
@@ -286,7 +292,8 @@ function drawGraph(
         }
 
         else if (
-            normalized.startsWith("0XDEP")
+            depositSet.has(address.toLowerCase())
+            || normalized.startsWith("0XDEP")
         ) {
 
             type =
@@ -295,7 +302,8 @@ function drawGraph(
         }
 
         else if (
-            normalized.startsWith("0XHOT")
+            hotSet.has(address.toLowerCase())
+            || normalized.startsWith("0XHOT")
         ) {
 
             type =
@@ -609,6 +617,20 @@ function drawGraph(
 
                         "border-width":
                             "5px"
+                    }
+                },
+
+
+                /* ---------- MATCHED VASP INFRASTRUCTURE ---------- */
+
+                {
+                    selector:
+                        'node[vaspMatch = true]',
+
+                    style: {
+                        "border-width": 6,
+                        "border-color": "#ffffff",
+                        "opacity": 1
                     }
                 },
 
@@ -2261,6 +2283,8 @@ function generateReport() {
     const matchedAddressElement =
         document.getElementById(
             "matchedVaspAddresses"
+        ) || document.getElementById(
+            "matchedVaspAddrresses"
         );
 
 
@@ -2319,7 +2343,7 @@ function generateReport() {
             intelligence.candidate_vasp !==
             "INCONCLUSIVE"
 
-                ? "Transaction behavior + deposit/hot-wallet relationship + external VASP intelligence."
+                ? "Observed transaction behavior + deposit/consolidation evidence + external service intelligence."
 
                 : "Transaction behavior analyzed; no reliable service attribution established.";
     }
@@ -2340,6 +2364,13 @@ function generateReport() {
         source.innerText =
             data.source ||
             "Live blockchain data + external VASP intelligence";
+
+        if (data.trace_errors && data.trace_errors.length) {
+            source.innerText +=
+                " | Partial lookup: " +
+                data.trace_errors.length +
+                " wallet lookup(s) returned an error.";
+        }
     }
 
 
