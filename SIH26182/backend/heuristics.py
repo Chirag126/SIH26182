@@ -354,3 +354,272 @@ def analyze_transactions(transactions, vasp_data):
         "bridge_detected":
             bridge_detected
     }
+
+def calculate_live_confidence(
+    transactions,
+    addresses,
+    external_vasp_matches,
+    intelligence
+):
+    """
+    Calculate attribution confidence for REAL wallet investigations.
+
+    This is an evidence score, not a probability of ownership.
+    It uses only observed blockchain / intelligence signals.
+    """
+
+    if not transactions:
+        return {
+            "confidence": 0,
+            "evidence_breakdown": {},
+            "score_explanation": "No transaction evidence available."
+        }
+
+    wallet_addresses = {
+        str(address).lower()
+        for address in addresses
+    }
+
+    # --------------------------------------------------
+    # 1. Transaction evidence
+    # --------------------------------------------------
+
+    transaction_count = len(transactions)
+
+    transaction_evidence = min(
+        transaction_count / 20,
+        1.0
+    )
+
+    # --------------------------------------------------
+    # 2. Counterparty diversity
+    # --------------------------------------------------
+
+    counterparties = set()
+
+    for tx in transactions:
+
+        sender = str(
+            tx.get("from", "")
+        ).lower()
+
+        receiver = str(
+            tx.get("to", "")
+        ).lower()
+
+        if sender:
+            counterparties.add(sender)
+
+        if receiver:
+            counterparties.add(receiver)
+
+    counterparty_evidence = min(
+        len(counterparties) / 20,
+        1.0
+    )
+
+    # --------------------------------------------------
+    # 3. Flow continuity
+    #
+    # Measures how often a received address also
+    # becomes a sender later in the observed graph.
+    # --------------------------------------------------
+
+    senders = {
+        str(tx.get("from", "")).lower()
+        for tx in transactions
+        if tx.get("from")
+    }
+
+    receivers = {
+        str(tx.get("to", "")).lower()
+        for tx in transactions
+        if tx.get("to")
+    }
+
+    continuing_addresses = (
+        senders.intersection(receivers)
+    )
+
+    if receivers:
+        flow_continuity = min(
+            len(continuing_addresses)
+            / len(receivers),
+            1.0
+        )
+    else:
+        flow_continuity = 0.0
+
+    # --------------------------------------------------
+    # 4. Deposit behaviour
+    # --------------------------------------------------
+
+    deposit_candidates = intelligence.get(
+        "deposit_candidates",
+        []
+    )
+
+    deposit_evidence = min(
+        len(deposit_candidates) / 3,
+        1.0
+    )
+
+    # --------------------------------------------------
+    # 5. Hot-wallet / sweep behaviour
+    # --------------------------------------------------
+
+    hot_wallets = intelligence.get(
+        "hot_wallets",
+        []
+    )
+
+    sweep_evidence = min(
+        len(hot_wallets) / 2,
+        1.0
+    )
+
+    # --------------------------------------------------
+    # 6. External VASP intelligence
+    #
+    # Presence of a labelled exchange/custodian address
+    # is an attribution signal.
+    # --------------------------------------------------
+
+    external_match_evidence = 0.0
+
+    if external_vasp_matches:
+
+        labelled_addresses = {
+            str(match.get("address", "")).lower()
+            for match in external_vasp_matches
+            if match.get("address")
+        }
+
+        matched_count = len(
+            labelled_addresses.intersection(
+                wallet_addresses
+            )
+        )
+
+        if matched_count:
+            external_match_evidence = min(
+                matched_count / 2,
+                1.0
+            )
+        else:
+            # Intelligence returned a VASP/service label,
+            # but it was not necessarily one of the exact
+            # traced addresses.
+            external_match_evidence = 0.5
+
+    # --------------------------------------------------
+    # 7. Graph proximity
+    #
+    # The current tracer records the addresses actually
+    # reached. More observed connected addresses provide
+    # stronger graph evidence.
+    # --------------------------------------------------
+
+    graph_evidence = min(
+        len(wallet_addresses) / 8,
+        1.0
+    )
+
+    # --------------------------------------------------
+    # 8. Risk factors
+    # --------------------------------------------------
+
+    risk_penalty = 0.0
+
+    if intelligence.get(
+        "mixer_detected",
+        False
+    ):
+        risk_penalty += 0.20
+
+    if intelligence.get(
+        "bridge_detected",
+        False
+    ):
+        risk_penalty += 0.10
+
+    risk_penalty = min(
+        risk_penalty,
+        1.0
+    )
+
+    # --------------------------------------------------
+    # Evidence aggregation
+    #
+    # Equal contribution prevents one single signal
+    # from dominating the entire attribution.
+    # --------------------------------------------------
+
+    evidence_signals = [
+        transaction_evidence,
+        counterparty_evidence,
+        flow_continuity,
+        deposit_evidence,
+        sweep_evidence,
+        external_match_evidence,
+        graph_evidence
+    ]
+
+    base_evidence = (
+        sum(evidence_signals)
+        / len(evidence_signals)
+    )
+
+    final_score = (
+        base_evidence
+        * (1 - risk_penalty)
+        * 100
+    )
+
+    confidence = round(
+        max(
+            0,
+            min(
+                final_score,
+                100
+            )
+        )
+    )
+
+    evidence_breakdown = {
+        "transaction_evidence": round(
+            transaction_evidence * 100
+        ),
+        "counterparty_evidence": round(
+            counterparty_evidence * 100
+        ),
+        "flow_continuity": round(
+            flow_continuity * 100
+        ),
+        "deposit_evidence": round(
+            deposit_evidence * 100
+        ),
+        "sweep_evidence": round(
+            sweep_evidence * 100
+        ),
+        "external_vasp_evidence": round(
+            external_match_evidence * 100
+        ),
+        "graph_evidence": round(
+            graph_evidence * 100
+        ),
+        "risk_penalty": round(
+            risk_penalty * 100
+        )
+    }
+
+    return {
+        "confidence": confidence,
+        "evidence_breakdown": evidence_breakdown,
+        "score_explanation": (
+            "Confidence is calculated from observed "
+            "transaction, graph, behavioural and "
+            "external-intelligence evidence. "
+            "Mixer and bridge activity reduce the score."
+        )
+    }

@@ -7,7 +7,7 @@ import os
 import requests
 from dotenv import load_dotenv
 
-from backend.heuristics import analyze_transactions
+from backend.heuristics import (analyze_transactions,calculate_live_confidence)
 
 load_dotenv()
 
@@ -593,14 +593,10 @@ def investigate(wallet: str):
                     "aml_score": aml_score
                 })        
 
-        vasp_data = load_json(
-            "vasp_data.json"
-        )
-
         intelligence = (
             analyze_transactions(
                 transactions,
-                vasp_data
+                []
             )
         )
 
@@ -646,15 +642,6 @@ def investigate(wallet: str):
             ]
 
             intelligence[
-                "confidence"
-            ] = max(
-                intelligence[
-                    "confidence"
-                ],
-                75
-            )
-
-            intelligence[
                 "findings"
             ].append({
                 "name":
@@ -664,6 +651,34 @@ def investigate(wallet: str):
                 "points":
                     0
             })
+
+            live_confidence = calculate_live_confidence(
+
+                transactions=transactions,
+                addresses=addresses,
+                external_vasp_matches=external_vasp_matches,
+                intelligence=intelligence
+            )
+
+            intelligence[
+                "confidence"
+            ] = live_confidence[
+                "confidence"
+            ]
+
+            intelligence[
+                "evidence_breakdown"
+            ] = live_confidence[
+                "evidence_breakdown"
+            ]
+
+            intelligence[
+                "score_explanation"
+            ] = live_confidence[
+                "score_explanation"
+            ]
+
+           
 
         return {
             "wallet": wallet,
