@@ -923,3 +923,26 @@ select {
 .evidence-stage.vasp .evidence-title {
     color: #75e6ad;
 }
+
+#graphStage {
+    position: relative;
+    overflow: hidden;
+}
+
+#graph {
+    min-height: 520px;
+}
+
+#graph canvas {
+    transition: opacity 0.2s ease;
+}
+
+#graphStage:fullscreen {
+    background: #0b1120;
+    padding: 24px;
+}
+
+#graphStage:fullscreen #graph {
+    height: calc(100vh - 90px);
+    min-height: 0;
+}

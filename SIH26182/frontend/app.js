@@ -680,16 +680,16 @@ function drawGraph(
                             2,
 
                         "line-color":
-                            "#65728f",
+                            "#38bdf8",
 
                         "line-dash-pattern":
-                            [7, 5],
+                            [8, 6],
 
                         "line-dash-phase":
                             0,
 
                         "target-arrow-color":
-                            "#65728f",
+                            "#38bdf8",
 
                         "target-arrow-shape":
                             "triangle",
@@ -697,12 +697,47 @@ function drawGraph(
                         "curve-style":
                             "bezier",
 
+                        "control-point-step-size":
+                            45,    
+
                         "opacity":
-                            0.18,
+                            0.45,
 
                         "label":
                             ""
                     }
+                },
+
+                {
+                    selector: 'edge[txType = "mixer"]',
+                        style: {
+                            "line-color": "#f59e0b",
+                            "target-arrow-color": "#f59e0b"
+                        }
+                },
+
+                {
+                    selector: 'edge[txType = "bridge"]',
+                        style: {
+                            "line-color": "#a855f7",
+                            "target-arrow-color": "#a855f7"
+                        }
+                },
+
+                {
+                    selector: 'edge[txType = "deposit"]',
+                        style: {
+                            "line-color": "#22c55e",
+                            "target-arrow-color": "#22c55e"
+                        }
+                },
+
+                {
+                    selector: 'edge[txType = "hot"]',
+                        style: {
+                            "line-color": "#ef4444",
+                            "target-arrow-color": "#ef4444"
+                        }
                 },
 
 
@@ -894,9 +929,15 @@ function drawGraph(
             return;
         }
 
-        graphDashPhase = (graphDashPhase + 0.65) % 20;
-        cy.edges().forEach(edge => {
-            edge.style("line-dash-phase", graphDashPhase);
+        graphDashPhase = (graphDashPhase + 0.8) % 100;
+
+        cy.edges().forEach((edge, index) => {
+        // Moving dashed flow
+            edge.style("line-dash-phase", graphDashPhase + (index * 8));
+
+        // Slight pulsing effect
+            const pulse = 2.2 + Math.sin((graphDashPhase + index * 25) * Math.PI / 50) * 0.8;
+            edge.style("width", pulse);
         });
 
         graphAnimationFrame = requestAnimationFrame(animateGraphEdges);
