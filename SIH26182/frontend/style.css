@@ -455,3 +455,471 @@ select {
     color: #8ee6ff;
     font-weight: 600;
 }
+
+/* =========================================================
+   GRAPH EXPERIENCE
+   ========================================================= */
+
+.graph-card {
+    position: relative;
+    overflow: hidden;
+}
+
+.graph-header {
+    align-items: flex-start;
+    margin-bottom: 16px;
+}
+
+.graph-header > div:first-child {
+    min-width: 0;
+}
+
+.graph-header h2 {
+    margin-bottom: 6px;
+}
+
+#graphStatus {
+    display: block;
+    color: #8d98b5;
+    font-size: 12px;
+}
+
+.graph-action {
+    flex: 0 0 auto;
+    padding: 10px 14px;
+    background: #18223a;
+    border: 1px solid #3a4867;
+    color: #dce5f7;
+    font-size: 12px;
+}
+
+.graph-action:hover {
+    background: #202d4a;
+    opacity: 1;
+}
+
+.graph-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: #0d1424;
+    border: 1px solid #252d44;
+    border-radius: 10px;
+}
+
+.graph-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 9px 14px;
+}
+
+.graph-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #aab5ca;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.legend-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 1px solid rgba(255,255,255,.45);
+}
+
+.legend-start { background: #e05a5a; }
+.legend-wallet { background: #4f7cff; }
+.legend-deposit { background: #e6a817; }
+.legend-hot { background: #22b573; }
+.legend-mixer { background: #b84b4b; }
+.legend-bridge { background: #7a55c7; }
+.legend-destination { background: #3298db; }
+
+.graph-hint {
+    flex: 0 0 auto;
+    color: #65728f;
+    font-size: 11px;
+    text-align: right;
+}
+
+#graphStage {
+    position: relative;
+}
+
+#graph {
+    height: 500px;
+    transition: height .25s ease;
+}
+
+#graphStage.graph-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    background: #080d19;
+    padding: 18px;
+}
+
+#graphStage.graph-fullscreen #graph {
+    height: calc(100vh - 36px);
+    border-radius: 12px;
+}
+
+#graphStage.graph-fullscreen .graph-popup {
+    z-index: 10001;
+}
+
+.graph-popup {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: min(350px, calc(100% - 32px));
+    max-height: calc(100% - 32px);
+    overflow: auto;
+    padding: 17px 18px;
+    background: rgba(11, 18, 32, .97);
+    border: 1px solid #52627f;
+    border-radius: 12px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.48);
+    color: #fff;
+    z-index: 20;
+}
+
+.graph-popup.hidden {
+    display: none;
+}
+
+.popup-close {
+    position: absolute;
+    top: 7px;
+    right: 8px;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 50%;
+    background: #18223a;
+    border: 1px solid #3a4867;
+    font-size: 21px;
+    line-height: 1;
+}
+
+.popup-kicker {
+    color: #8d98b5;
+    font-size: 10px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+}
+
+.popup-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 34px 12px 0;
+}
+
+.popup-row {
+    display: grid;
+    grid-template-columns: 82px 1fr;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid #252d44;
+    font-size: 11px;
+}
+
+.popup-row strong {
+    color: #8ee6ff;
+    font-weight: 600;
+}
+
+.popup-row span {
+    color: #d8dfed;
+    word-break: break-word;
+}
+
+/* =========================================================
+   EVIDENCE CHAIN + TRANSACTIONS
+   ========================================================= */
+
+.evidence-chain {
+    margin: 14px 0 24px;
+    padding: 18px;
+    background: #080d19;
+    border: 1px solid #252d44;
+    border-radius: 12px;
+    text-align: left;
+}
+
+.transaction-section-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 15px;
+    margin-top: 30px;
+    margin-bottom: 12px;
+}
+
+.transaction-section-header h3 {
+    margin: 0 0 5px;
+}
+
+.transaction-section-header p {
+    margin: 0;
+    color: #65728f;
+    font-size: 12px;
+}
+
+.transaction-count {
+    flex: 0 0 auto;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: #18223a;
+    border: 1px solid #303951;
+    color: #aab5ca;
+    font-size: 11px;
+}
+
+.transaction-table {
+    overflow: hidden;
+    border: 1px solid #252d44;
+    border-radius: 12px;
+    background: #080d19;
+}
+
+.transaction-table-head,
+.transaction-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1.2fr) minmax(150px, 1.4fr) minmax(150px, 1.4fr) 110px 100px;
+    gap: 12px;
+    align-items: center;
+}
+
+.transaction-table-head {
+    padding: 11px 14px;
+    background: #111a2c;
+    border-bottom: 1px solid #303951;
+    color: #74819c;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.transaction-row {
+    padding: 13px 14px;
+    border-bottom: 1px solid #1c263a;
+    font-size: 11px;
+}
+
+.transaction-row:last-child {
+    border-bottom: 0;
+}
+
+.transaction-row:hover {
+    background: #0d1424;
+}
+
+.tx-hash {
+    color: #8ee6ff;
+    font-family: monospace;
+    word-break: break-all;
+}
+
+.tx-address {
+    color: #b9c4d8;
+    font-family: monospace;
+    word-break: break-all;
+}
+
+.tx-amount {
+    color: #f4f7fb;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.tx-chain {
+    color: #aab5ca;
+}
+
+.tx-direction {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: #18223a;
+    color: #cdd7e8;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.tx-direction.outgoing {
+    color: #ffb0b0;
+}
+
+.tx-direction.incoming {
+    color: #91e9bd;
+}
+
+@media(max-width: 900px) {
+    .graph-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .graph-hint {
+        text-align: left;
+    }
+
+    .transaction-table {
+        overflow-x: auto;
+    }
+
+    .transaction-table-head,
+    .transaction-row {
+        min-width: 760px;
+    }
+}
+
+@media(max-width: 600px) {
+    .graph-header {
+        gap: 10px;
+    }
+
+    .graph-action {
+        padding: 9px 10px;
+        font-size: 11px;
+    }
+
+    #graph {
+        height: 430px;
+    }
+
+    .graph-popup {
+        top: 10px;
+        right: 10px;
+        width: calc(100% - 20px);
+    }
+
+    .transaction-section-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+
+/* Native browser full-screen state */
+#graphStage:fullscreen {
+    width: 100%;
+    height: 100%;
+    padding: 18px;
+    background: #080d19;
+}
+
+#graphStage:fullscreen #graph {
+    width: 100%;
+    height: calc(100vh - 36px);
+}
+
+#graphStage:fullscreen .graph-popup {
+    z-index: 10001;
+}
+
+/* Evidence-chain cards */
+.evidence-stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 13px;
+    min-height: 68px;
+}
+
+.evidence-stage:last-child {
+    min-height: 0;
+}
+
+.evidence-marker {
+    position: relative;
+    display: flex;
+    justify-content: center;
+}
+
+.evidence-marker::after {
+    content: "";
+    position: absolute;
+    top: 36px;
+    bottom: -1px;
+    width: 2px;
+    background: #303b55;
+}
+
+.evidence-stage:last-child .evidence-marker::after {
+    display: none;
+}
+
+.evidence-number {
+    position: relative;
+    z-index: 1;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: #18223a;
+    border: 1px solid #52627f;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.evidence-content {
+    margin-bottom: 13px;
+    padding: 11px 13px;
+    background: #0d1424;
+    border: 1px solid #252d44;
+    border-radius: 9px;
+}
+
+.evidence-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #f3f6fb;
+}
+
+.evidence-value {
+    margin-top: 4px;
+    color: #aeb9cd;
+    font: 11px monospace;
+    word-break: break-all;
+}
+
+.evidence-description {
+    margin-top: 4px;
+    color: #65728f;
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.evidence-stage.warning .evidence-number,
+.evidence-stage.warning .evidence-content {
+    border-color: #806d35;
+}
+
+.evidence-stage.warning .evidence-title {
+    color: #ffd166;
+}
+
+.evidence-stage.vasp .evidence-number,
+.evidence-stage.vasp .evidence-content {
+    border-color: #367a5b;
+}
+
+.evidence-stage.vasp .evidence-title {
+    color: #75e6ad;
+}

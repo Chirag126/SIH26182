@@ -1,4 +1,7 @@
 let investigationData = null;
+let activeGraph = null;
+let graphAnimationFrame = null;
+let graphDashPhase = 0;
 
 const scenarios = {
     normal: {
@@ -346,11 +349,16 @@ function drawGraph(
 
                 id: address,
 
-                label: "",
+                label:
+                    address.length > 17
+                        ? address.slice(0, 8) + "…" + address.slice(-6)
+                        : address,
 
                 address: address,
 
-                type: type
+                type: type,
+
+                vaspMatch: matchedSet.has(address.toLowerCase())
             }
         });
     }
@@ -409,7 +417,10 @@ function drawGraph(
                         tx.from,
 
                     to:
-                        tx.to
+                        tx.to,
+
+                    displayAmount:
+                        tx.amount ?? "Unknown"
                 }
             });
         }
@@ -419,6 +430,16 @@ function drawGraph(
     /* -----------------------------------------------------
        CREATE CYTOSCAPE
        ----------------------------------------------------- */
+
+    if (graphAnimationFrame) {
+        cancelAnimationFrame(graphAnimationFrame);
+        graphAnimationFrame = null;
+    }
+
+    if (activeGraph) {
+        activeGraph.destroy();
+        activeGraph = null;
+    }
 
     const cy =
         cytoscape({
@@ -602,6 +623,18 @@ function drawGraph(
 
                 {
                     selector:
+                        "node.selected",
+
+                    style: {
+                        "opacity": 1,
+                        "border-width": 6,
+                        "border-color": "#ffffff",
+                        "z-index": 999
+                    }
+                },
+
+                {
+                    selector:
                         "node.hovered",
 
                     style: {
@@ -649,6 +682,12 @@ function drawGraph(
                         "line-color":
                             "#65728f",
 
+                        "line-dash-pattern":
+                            [7, 5],
+
+                        "line-dash-phase":
+                            0,
+
                         "target-arrow-color":
                             "#65728f",
 
@@ -668,6 +707,20 @@ function drawGraph(
 
 
                 /* ---------- HOVER / PIN EDGE ---------- */
+
+                {
+                    selector:
+                        "edge.selected",
+
+                    style: {
+                        "width": 5,
+                        "line-color": "#ffffff",
+                        "target-arrow-color": "#ffffff",
+                        "target-arrow-shape": "triangle",
+                        "opacity": 1,
+                        "line-dash-pattern": [9, 5]
+                    }
+                },
 
                 {
                     selector:
@@ -712,636 +765,209 @@ function drawGraph(
 
 
     /* =====================================================
-       GRAPH TOOLTIP
+       GRAPH INTERACTION
        ===================================================== */
 
-    let tooltip =
-        document.getElementById(
-            "graphTooltip"
-        );
+    const popup = document.getElementById("graphPopup");
+    const popupContent = document.getElementById("graphPopupContent");
+    const popupClose = document.getElementById("graphPopupClose");
 
-
-    if (!tooltip) {
-
-        tooltip =
-            document.createElement(
-                "div"
-            );
-
-        tooltip.id =
-            "graphTooltip";
-
-        document.body.appendChild(
-            tooltip
-        );
+    function closeGraphPopup() {
+        if (popup) {
+            popup.classList.add("hidden");
+        }
+        cy.elements().removeClass("selected");
     }
 
+    function showGraphPopup(kicker, title, rows, element) {
+        if (!popup || !popupContent) {
+            return;
+        }
 
-    let pinnedElement =
-        null;
+        popupContent.innerHTML = "";
 
+        const kickerEl = document.createElement("div");
+        kickerEl.className = "popup-kicker";
+        kickerEl.textContent = kicker;
 
-    /* -----------------------------------------------------
-       SHOW TOOLTIP
-       ----------------------------------------------------- */
+        const titleEl = document.createElement("div");
+        titleEl.className = "popup-title";
+        titleEl.textContent = title;
 
-    function showTooltip(
-        content,
-        position
-    ) {
+        popupContent.appendChild(kickerEl);
+        popupContent.appendChild(titleEl);
 
-        tooltip.innerHTML =
-            "";
+        rows.forEach(item => {
+            const row = document.createElement("div");
+            row.className = "popup-row";
 
+            const label = document.createElement("strong");
+            label.textContent = item.label;
 
-        content.forEach(
-            item => {
+            const value = document.createElement("span");
+            value.textContent = item.value ?? "Unknown";
 
-                const row =
-                    document.createElement(
-                        "div"
-                    );
+            row.appendChild(label);
+            row.appendChild(value);
+            popupContent.appendChild(row);
+        });
 
-                const label =
-                    document.createElement(
-                        "strong"
-                    );
+        cy.elements().removeClass("selected");
+        if (element) {
+            element.addClass("selected");
+        }
 
-                const value =
-                    document.createElement(
-                        "span"
-                    );
-
-
-                label.textContent =
-                    item.label + ": ";
-
-                value.textContent =
-                    item.value;
-
-
-                row.appendChild(
-                    label
-                );
-
-                row.appendChild(
-                    value
-                );
-
-                tooltip.appendChild(
-                    row
-                );
-            }
-        );
-
-
-        tooltip.style.display =
-            "block";
-
-
-        const graphRect =
-            document
-                .getElementById(
-                    "graph"
-                )
-                .getBoundingClientRect();
-
-
-        tooltip.style.left =
-            (
-                graphRect.left +
-                position.x +
-                15
-            ) + "px";
-
-
-        tooltip.style.top =
-            (
-                graphRect.top +
-                position.y +
-                15
-            ) + "px";
+        popup.classList.remove("hidden");
     }
 
-
-    /* -----------------------------------------------------
-       HIDE TOOLTIP
-       ----------------------------------------------------- */
-
-    function hideTooltip() {
-
-        tooltip.style.display =
-            "none";
+    function nodeTypeLabel(type) {
+        const labels = {
+            start: "Investigated Wallet",
+            deposit: "Candidate Deposit Address",
+            hot: "VASP Hot Wallet",
+            mixer: "Mixer",
+            bridge: "Cross-Chain Bridge",
+            destination: "Destination Wallet",
+            wallet: "Wallet"
+        };
+        return labels[type] || "Wallet";
     }
 
-
-    /* -----------------------------------------------------
-       NODE INFORMATION
-       ----------------------------------------------------- */
-
-    function getNodeInformation(
-        node
-    ) {
-
-        const data =
-            node.data();
-
-        let type =
-            "Wallet";
-
-
-        if (
-            data.type ===
-            "start"
-        ) {
-
-            type =
-                "Unknown / Investigated Wallet";
-        }
-
-        else if (
-            data.type ===
-            "deposit"
-        ) {
-
-            type =
-                "Candidate Deposit Address";
-        }
-
-        else if (
-            data.type ===
-            "hot"
-        ) {
-
-            type =
-                "VASP Hot Wallet";
-        }
-
-        else if (
-            data.type ===
-            "mixer"
-        ) {
-
-            type =
-                "Mixer";
-        }
-
-        else if (
-            data.type ===
-            "bridge"
-        ) {
-
-            type =
-                "Cross-Chain Bridge";
-        }
-
-        else if (
-            data.type ===
-            "destination"
-        ) {
-
-            type =
-                "Destination Chain Wallet";
-        }
-
-
+    function getNodeRows(node) {
+        const data = node.data();
         return [
-
-            {
-                label:
-                    "Type",
-
-                value:
-                    type
-            },
-
-            {
-                label:
-                    "Address",
-
-                value:
-                    data.address
-            },
-
-            {
-                label:
-                    "Incoming",
-
-                value:
-                    node
-                        .incomers("edge")
-                        .length
-            },
-
-            {
-                label:
-                    "Outgoing",
-
-                value:
-                    node
-                        .outgoers("edge")
-                        .length
-            }
+            { label: "Type", value: nodeTypeLabel(data.type) },
+            { label: "Address", value: data.address },
+            { label: "Incoming", value: node.incomers("edge").length },
+            { label: "Outgoing", value: node.outgoers("edge").length },
+            ...(data.vaspMatch ? [{ label: "VASP", value: "Matched infrastructure" }] : [])
         ];
     }
 
-
-    /* -----------------------------------------------------
-       EDGE INFORMATION
-       ----------------------------------------------------- */
-
-    function getEdgeInformation(
-        edge
-    ) {
-
-        const data =
-            edge.data();
-
-
+    function getEdgeRows(edge) {
+        const data = edge.data();
         return [
-
-            {
-                label:
-                    "Transaction",
-
-                value:
-                    data.tx_hash
-            },
-
-            {
-                label:
-                    "From",
-
-                value:
-                    data.from
-            },
-
-            {
-                label:
-                    "To",
-
-                value:
-                    data.to
-            },
-
-            {
-                label:
-                    "Amount",
-
-                value:
-                    data.amount
-            },
-
-            {
-                label:
-                    "Chain",
-
-                value:
-                    data.chain
-            }
+            { label: "TX Hash", value: data.tx_hash },
+            { label: "From", value: data.from },
+            { label: "To", value: data.to },
+            { label: "Amount", value: data.amount },
+            { label: "Chain", value: data.chain }
         ];
     }
 
-
-    /* =====================================================
-       NODE HOVER
-       ===================================================== */
-
-    cy.on(
-        "mouseover",
-        "node",
-        function(event) {
-
-            const node =
-                event.target;
-
-
-            /*
-             * If something is already pinned,
-             * don't let another hover replace it.
-             */
-
-            if (
-                pinnedElement &&
-                pinnedElement !== node
-            ) {
-                return;
-            }
-
-
-            node.addClass(
-                "hovered"
-            );
-
-
-            showTooltip(
-                getNodeInformation(
-                    node
-                ),
-                node.renderedPosition()
-            );
-        }
-    );
-
-
-    /* =====================================================
-       NODE MOUSEOUT
-       ===================================================== */
-
-    cy.on(
-        "mouseout",
-        "node",
-        function(event) {
-
-            const node =
-                event.target;
-
-
-            /*
-             * Pinned details stay visible.
-             */
-
-            if (
-                pinnedElement ===
-                node
-            ) {
-                return;
-            }
-
-
-            node.removeClass(
-                "hovered"
-            );
-
-            hideTooltip();
-        }
-    );
-
-
-    /* =====================================================
-       NODE CLICK
-       ===================================================== */
-
-    cy.on(
-        "tap",
-        "node",
-        function(event) {
-
-            const node =
-                event.target;
-
-
-            /*
-             * Clicking the same node again
-             * removes the pinned information.
-             */
-
-            if (
-                pinnedElement ===
-                node
-            ) {
-
-                pinnedElement =
-                    null;
-
-                node.removeClass(
-                    "hovered"
-                );
-
-                hideTooltip();
-
-                return;
-            }
-
-
-            /*
-             * Remove previous pinned object.
-             */
-
-            if (
-                pinnedElement
-            ) {
-
-                pinnedElement.removeClass(
-                    "hovered"
-                );
-            }
-
-
-            /*
-             * Pin new node.
-             */
-
-            pinnedElement =
-                node;
-
-            node.addClass(
-                "hovered"
-            );
-
-
-            showTooltip(
-                getNodeInformation(
-                    node
-                ),
-                node.renderedPosition()
-            );
-        }
-    );
-
-
-    /* =====================================================
-       EDGE HOVER
-       ===================================================== */
-
-    cy.on(
-        "mouseover",
-        "edge",
-        function(event) {
-
-            const edge =
-                event.target;
-
-
-            if (
-                pinnedElement &&
-                pinnedElement !== edge
-            ) {
-                return;
-            }
-
-
-            edge.addClass(
-                "hovered"
-            );
-
-
-            showTooltip(
-                getEdgeInformation(
-                    edge
-                ),
-                edge.renderedMidpoint()
-            );
-        }
-    );
-
-
-    /* =====================================================
-       EDGE MOUSEOUT
-       ===================================================== */
-
-    cy.on(
-        "mouseout",
-        "edge",
-        function(event) {
-
-            const edge =
-                event.target;
-
-
-            if (
-                pinnedElement ===
-                edge
-            ) {
-                return;
-            }
-
-
-            edge.removeClass(
-                "hovered"
-            );
-
-            hideTooltip();
-        }
-    );
-
-
-    /* =====================================================
-       EDGE CLICK
-       ===================================================== */
-
-       cy.on(
-        "tap",
-        "edge",
-        function(event) {
-
-            const edge =
-                event.target;
-
-
-            /*
-             * Click same edge again = close.
-             */
-
-            if (
-                pinnedElement ===
-                edge
-            ) {
-
-                pinnedElement =
-                    null;
-
-                edge.removeClass(
-                    "hovered"
-                );
-
-                hideTooltip();
-
-                return;
-            }
-
-
-            /*
-             * Remove previous pinned object.
-             */
-
-            if (
-                pinnedElement
-            ) {
-
-                pinnedElement.removeClass(
-                    "hovered"
-                );
-            }
-
-
-            /*
-             * Pin selected transaction.
-             */
-
-            pinnedElement =
-                edge;
-
-            edge.addClass(
-                "hovered"
-            );
-
-
-            showTooltip(
-                getEdgeInformation(
-                    edge
-                ),
-                edge.renderedMidpoint()
-            );
-        }
-    );
-
-
-    /* =====================================================
-       CLICK EMPTY GRAPH
-       ===================================================== */
-
-    cy.on(
-        "tap",
-        function(event) {
-
-            if (
-                event.target ===
-                cy
-            ) {
-
-                if (
-                    pinnedElement
-                ) {
-
-                    pinnedElement.removeClass(
-                        "hovered"
-                    );
-                }
-
-
-                pinnedElement =
-                    null;
-
-                hideTooltip();
-            }
-        }
-    );
-
-
-    /* =====================================================
-       LEAVE GRAPH
-       ===================================================== */
-
-    document
-        .getElementById("graph")
-        .addEventListener(
-            "mouseleave",
-            function() {
-
-                if (
-                    !pinnedElement
-                ) {
-
-                    hideTooltip();
-                }
-            }
+    cy.on("tap", "node", function(event) {
+        const node = event.target;
+        showGraphPopup(
+            "WALLET DETAILS",
+            node.data("address"),
+            getNodeRows(node),
+            node
         );
+    });
 
+    cy.on("tap", "edge", function(event) {
+        const edge = event.target;
+        showGraphPopup(
+            "TRANSACTION DETAILS",
+            edge.data("tx_hash") || "Transaction",
+            getEdgeRows(edge),
+            edge
+        );
+    });
+
+    cy.on("tap", function(event) {
+        if (event.target === cy) {
+            closeGraphPopup();
+        }
+    });
+
+    if (popupClose) {
+        popupClose.onclick = closeGraphPopup;
+    }
+
+    /* -----------------------------------------------------
+       SUBTLE MOVING TRANSACTION PATHS
+       ----------------------------------------------------- */
+
+    function animateGraphEdges() {
+        if (!cy || cy.destroyed()) {
+            return;
+        }
+
+        graphDashPhase = (graphDashPhase + 0.65) % 20;
+        cy.edges().forEach(edge => {
+            edge.style("line-dash-phase", graphDashPhase);
+        });
+
+        graphAnimationFrame = requestAnimationFrame(animateGraphEdges);
+    }
+
+    animateGraphEdges();
+    activeGraph = cy;
 
     return cy;
 }
 
+
+/* =========================================================
+   GRAPH FULL SCREEN
+   ========================================================= */
+
+async function toggleGraphFullscreen() {
+    const stage = document.getElementById("graphStage");
+    const button = document.getElementById("graphFullscreenBtn");
+
+    if (!stage) {
+        return;
+    }
+
+    try {
+        if (!document.fullscreenElement) {
+            if (stage.requestFullscreen) {
+                await stage.requestFullscreen();
+            } else {
+                stage.classList.add("graph-fullscreen");
+            }
+        } else if (document.exitFullscreen) {
+            await document.exitFullscreen();
+        }
+    } catch (error) {
+        stage.classList.toggle("graph-fullscreen");
+    }
+
+    if (activeGraph) {
+        setTimeout(() => activeGraph.resize(), 120);
+    }
+
+    if (button) {
+        button.innerText = document.fullscreenElement
+            ? "⛶ Exit Full Screen"
+            : "⛶ Full Screen";
+    }
+}
+
+document.addEventListener("fullscreenchange", function() {
+    const stage = document.getElementById("graphStage");
+    const button = document.getElementById("graphFullscreenBtn");
+
+    if (!stage) {
+        return;
+    }
+
+    if (!document.fullscreenElement) {
+        stage.classList.remove("graph-fullscreen");
+    }
+
+    if (button) {
+        button.innerText = document.fullscreenElement
+            ? "⛶ Exit Full Screen"
+            : "⛶ Full Screen";
+    }
+
+    if (activeGraph) {
+        setTimeout(() => activeGraph.resize(), 120);
+    }
+});
 
 /* =========================================================
    ADDRESS TYPE
@@ -1932,295 +1558,52 @@ function renderEvidenceChain(
     data,
     intelligence
 ) {
-
-    const container =
-        document.getElementById(
-            "evidenceChain"
-        );
-
+    const container = document.getElementById("evidenceChain");
 
     if (!container) {
         return;
     }
 
-
-    const stages =
-        buildEvidenceChain(
-            data,
-            intelligence
-        );
-
-
-    container.innerHTML =
-        "";
-
-
-    /*
-     * Main evidence-chain wrapper.
-     */
-
-    const wrapper =
-        document.createElement(
-            "div"
-        );
-
-
-    wrapper.style.display =
-        "flex";
-
-    wrapper.style.flexDirection =
-        "column";
-
-    wrapper.style.gap =
-        "0";
-
-
-    stages.forEach(
-        (stage, index) => {
-
-            const item =
-                document.createElement(
-                    "div"
-                );
-
-
-            item.style.display =
-                "flex";
-
-            item.style.alignItems =
-                "stretch";
-
-
-            /* ---------- NUMBER ---------- */
-
-            const number =
-                document.createElement(
-                    "div"
-                );
-
-
-            number.innerText =
-                index + 1;
-
-
-            number.style.minWidth =
-                "34px";
-
-            number.style.height =
-                "34px";
-
-            number.style.borderRadius =
-                "50%";
-
-            number.style.display =
-                "flex";
-
-            number.style.alignItems =
-                "center";
-
-            number.style.justifyContent =
-                "center";
-
-            number.style.background =
-                "#1d293d";
-
-            number.style.border =
-                "1px solid #52627f";
-
-            number.style.color =
-                "#ffffff";
-
-            number.style.fontWeight =
-                "700";
-
-
-            /* ---------- CONTENT ---------- */
-
-            const content =
-                document.createElement(
-                    "div"
-                );
-
-
-            content.style.marginLeft =
-                "14px";
-
-            content.style.paddingBottom =
-                index ===
-                stages.length - 1
-                    ? "0"
-                    : "18px";
-
-
-            /* ---------- TITLE ---------- */
-
-            const title =
-                document.createElement(
-                    "div"
-                );
-
-
-            title.innerText =
-                stage.title;
-
-
-            title.style.fontWeight =
-                "700";
-
-            title.style.fontSize =
-                "14px";
-
-
-            if (
-                stage.type ===
-                "warning"
-            ) {
-
-                title.style.color =
-                    "#ffd166";
-
-            } else if (
-                stage.type ===
-                "vasp"
-            ) {
-
-                title.style.color =
-                    "#75e6ad";
-
-            } else {
-
-                title.style.color =
-                    "#ffffff";
-            }
-
-
-            /* ---------- VALUE ---------- */
-
-            const value =
-                document.createElement(
-                    "div"
-                );
-
-
-            value.innerText =
-                stage.value;
-
-
-            value.style.fontFamily =
-                "monospace";
-
-            value.style.fontSize =
-                "12px";
-
-            value.style.marginTop =
-                "3px";
-
-            value.style.wordBreak =
-                "break-all";
-
-            value.style.color =
-                "#9ca8bd";
-
-
-            /* ---------- DESCRIPTION ---------- */
-
-            const description =
-                document.createElement(
-                    "div"
-                );
-
-
-            description.innerText =
-                stage.description;
-
-
-            description.style.fontSize =
-                "11px";
-
-            description.style.marginTop =
-                "4px";
-
-            description.style.color =
-                "#65728f";
-
-
-            content.appendChild(
-                title
-            );
-
-            content.appendChild(
-                value
-            );
-
-            content.appendChild(
-                description
-            );
-
-
-            /* ---------- CONNECTOR ---------- */
-
-            if (
-                index <
-                stages.length - 1
-            ) {
-
-                const connector =
-                    document.createElement(
-                        "div"
-                    );
-
-
-                connector.style.position =
-                    "absolute";
-
-                connector.style.left =
-                    "16px";
-
-                connector.style.marginTop =
-                    "34px";
-
-                connector.style.width =
-                    "2px";
-
-                connector.style.height =
-                    "42px";
-
-                connector.style.background =
-                    "#39465e";
-            }
-
-
-            item.appendChild(
-                number
-            );
-
-            item.appendChild(
-                content
-            );
-
-
-            /*
-             * Relative position allows
-             * the evidence chain to remain
-             * visually connected.
-             */
-
-            item.style.position =
-                "relative";
-
-
-            wrapper.appendChild(
-                item
-            );
-        }
-    );
-
-
-    container.appendChild(
-        wrapper
-    );
+    const stages = buildEvidenceChain(data, intelligence);
+    container.innerHTML = "";
+
+    if (!stages.length) {
+        container.innerText = "No traceable evidence chain was generated.";
+        return;
+    }
+
+    stages.forEach((stage, index) => {
+        const item = document.createElement("div");
+        item.className = "evidence-stage " + (stage.type || "wallet");
+
+        const marker = document.createElement("div");
+        marker.className = "evidence-marker";
+
+        const number = document.createElement("div");
+        number.className = "evidence-number";
+        number.innerText = index + 1;
+        marker.appendChild(number);
+
+        const content = document.createElement("div");
+        content.className = "evidence-content";
+
+        const title = document.createElement("div");
+        title.className = "evidence-title";
+        title.innerText = stage.title;
+
+        const value = document.createElement("div");
+        value.className = "evidence-value";
+        value.innerText = stage.value || "Unknown";
+
+        const description = document.createElement("div");
+        description.className = "evidence-description";
+        description.innerText = stage.description || "Observed fund movement";
+
+        content.append(title, value, description);
+        item.append(marker, content);
+        container.appendChild(item);
+    });
 }
-
 
 /* =========================================================
    GENERATE REPORT
@@ -2494,46 +1877,52 @@ function generateReport() {
         transactionContainer
     ) {
 
-        transactionContainer.innerHTML =
-            "";
+        transactionContainer.innerHTML = "";
 
+        const transactions = data.transactions || [];
+        const countLabel = document.getElementById("transactionCountLabel");
 
-        const transactions =
-            data.transactions ||
-            [];
+        if (countLabel) {
+            countLabel.innerText =
+                `${transactions.length} transaction${transactions.length === 1 ? "" : "s"}`;
+        }
 
+        const head = document.createElement("div");
+        head.className = "transaction-table-head";
+        ["Transaction", "From", "To", "Amount", "Chain"].forEach(label => {
+            const cell = document.createElement("span");
+            cell.innerText = label;
+            head.appendChild(cell);
+        });
+        transactionContainer.appendChild(head);
 
-        transactions.forEach(
-            tx => {
+        transactions.forEach(tx => {
+            const row = document.createElement("div");
+            row.className = "transaction-row";
 
-                const row =
-                    document.createElement(
-                        "div"
-                    );
+            const hash = document.createElement("span");
+            hash.className = "tx-hash";
+            hash.innerText = tx.tx_hash || "Unknown";
 
+            const from = document.createElement("span");
+            from.className = "tx-address";
+            from.innerText = tx.from || "Unknown";
 
-                row.className =
-                    "transaction-row";
+            const to = document.createElement("span");
+            to.className = "tx-address";
+            to.innerText = tx.to || "Unknown";
 
+            const amount = document.createElement("span");
+            amount.className = "tx-amount";
+            amount.innerText = tx.amount ?? "Unknown";
 
-                const txHash =
-                    tx.tx_hash ||
-                    "Unknown";
+            const chain = document.createElement("span");
+            chain.className = "tx-chain";
+            chain.innerText = tx.chain || "Unknown";
 
-
-                row.innerHTML = `
-                    <span>${txHash}</span>
-                    <span>${tx.from}</span>
-                    <span>${tx.to}</span>
-                    <span>${tx.amount ?? "Unknown"}</span>
-                `;
-
-
-                transactionContainer.appendChild(
-                    row
-                );
-            }
-        );
+            row.append(hash, from, to, amount, chain);
+            transactionContainer.appendChild(row);
+        });
     }
 
 
