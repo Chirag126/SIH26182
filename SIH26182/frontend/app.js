@@ -1,6 +1,5 @@
 let investigationData = null;
 let activeGraph = null;
-let flowOverlayFrame = null;
 
 const scenarios = {
     normal: { wallet: "0xABC" },
@@ -185,15 +184,12 @@ function renderQuality(data) {
 }
 
 function drawGraph(transactions, startingWallet, analysisData = {}) {
-    if (flowOverlayFrame) cancelAnimationFrame(flowOverlayFrame);
     if (activeGraph) activeGraph.destroy();
     const graphEl = document.getElementById("graph");
-    const overlay = document.getElementById("graphFlowOverlay");
     const popup = document.getElementById("graphPopup");
     const popupContent = document.getElementById("graphPopupContent");
     const popupClose = document.getElementById("graphPopupClose");
     graphEl.innerHTML = "";
-    overlay.innerHTML = "";
 
     const intelligence = analysisData.intelligence || {};
     const classifications = new Map((analysisData.node_classification || []).map(x => [String(x.address).toLowerCase(), x]));
@@ -247,7 +243,7 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         container: graphEl,
         elements,
         style: [
-            { selector: "node", style: { "background-color": COLORS.wallet, "label": "data(label)", "color": "#eaf2ff", "text-valign": "center", "text-halign": "center", "font-size": 9, "font-weight": 700, "text-wrap": "wrap", "text-max-width": 78, "width": 64, "height": 64, "border-width": 2, "border-color": "#4c6485", "opacity": 0.82, "overlay-opacity": 0 } },
+            { selector: "node", style: { "background-color": COLORS.wallet, "label": "", "color": "#eaf2ff", "text-valign": "center", "text-halign": "center", "font-size": 9, "font-weight": 700, "text-wrap": "wrap", "text-max-width": 78, "width": 64, "height": 64, "border-width": 2, "border-color": "#4c6485", "opacity": 0.82, "overlay-opacity": 0 } },
             { selector: 'node[type="start"]', style: { "background-color": COLORS.start, "border-color": "#ffb1c0", "border-width": 4, "width": 76, "height": 76, "opacity": 1 } },
             { selector: 'node[type="deposit"]', style: { "background-color": COLORS.deposit, "border-color": "#ffe08a", "border-width": 4, "opacity": 1 } },
             { selector: 'node[type="hot"]', style: { "background-color": COLORS.hot, "border-color": "#8bf0bd", "border-width": 4, "opacity": 1 } },
@@ -264,10 +260,9 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
             { selector: 'edge[edgeType="bridge"]', style: { "line-color": COLORS.bridge, "target-arrow-color": COLORS.bridge, "opacity": 0.8 } },
             { selector: "edge:selected", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } }
         ],
-        layout: { name: "breadthfirst", directed: true, padding: 55, spacingFactor: 1.55, animate: true, animationDuration: 450 }
+        layout: { name: "breadthfirst", directed: true, padding: 55, spacingFactor: 1.55, animate: false }
     });
 
-    cy.nodes().forEach(node => node.data("label", shortAddress(node.data("address"))));
     activeGraph = cy;
     document.getElementById("graphEmpty").classList.toggle("hidden", transactions.length > 0);
 
@@ -301,44 +296,11 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     cy.on("tap", event => { if (event.target === cy) closePopup(); });
     popupClose.onclick = closePopup;
 
-    function drawFlowOverlay() {
-        overlay.setAttribute("width", graphEl.clientWidth);
-        overlay.setAttribute("height", graphEl.clientHeight);
-        overlay.setAttribute("viewBox", `0 0 ${graphEl.clientWidth} ${graphEl.clientHeight}`);
-        overlay.innerHTML = "";
-        cy.edges().forEach((edge, index) => {
-            const s = edge.source().renderedPosition();
-            const t = edge.target().renderedPosition();
-            const dx = t.x - s.x, dy = t.y - s.y;
-            const len = Math.max(1, Math.hypot(dx, dy));
-            const nx = -dy / len, ny = dx / len;
-            const bend = Math.min(42, Math.max(18, len * 0.08)) * (index % 2 ? -1 : 1);
-            const cx = (s.x + t.x) / 2 + nx * bend;
-            const cyy = (s.y + t.y) / 2 + ny * bend;
-            const d = `M ${s.x} ${s.y} Q ${cx} ${cyy} ${t.x} ${t.y}`;
-            const type = edge.data("edgeType") || "wallet";
-            const color = COLORS[type] || COLORS.wallet;
-            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            path.setAttribute("d", d); path.setAttribute("fill", "none"); path.setAttribute("stroke", color); path.setAttribute("stroke-width", "2.2"); path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-dasharray", "9 12"); path.setAttribute("opacity", "0.78"); path.classList.add("flow-path");
-            overlay.appendChild(path);
-            const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-            dot.setAttribute("r", "3.5"); dot.setAttribute("fill", color); dot.setAttribute("opacity", "0.95");
-            const motion = document.createElementNS("http://www.w3.org/2000/svg", "animateMotion");
-            motion.setAttribute("dur", `${2.2 + (index % 4) * 0.35}s`); motion.setAttribute("repeatCount", "indefinite"); motion.setAttribute("rotate", "auto");
-            const mpath = document.createElementNS("http://www.w3.org/2000/svg", "mpath");
-            const pathId = `flow-path-${index}`; path.setAttribute("id", pathId); mpath.setAttributeNS("http://www.w3.org/1999/xlink", "href", `#${pathId}`); motion.appendChild(mpath); dot.appendChild(motion); overlay.appendChild(dot);
-        });
-    }
-    function scheduleOverlay() {
-        if (flowOverlayFrame) return;
-        flowOverlayFrame = requestAnimationFrame(() => { flowOverlayFrame = null; drawFlowOverlay(); });
-    }
-    cy.on("render zoom pan resize position", scheduleOverlay);
-    setTimeout(() => { cy.fit(undefined, 55); scheduleOverlay(); }, 550);
+    setTimeout(() => { cy.fit(undefined, 55); }, 120);
 }
 
 function fitGraph() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.fit(undefined, 55); } }
-function resetGraphView() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.layout({name: "breadthfirst", directed: true, padding: 55, spacingFactor: 1.55, animate: true, animationDuration: 450}).run(); setTimeout(fitGraph, 500); } }
+function resetGraphView() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.layout({name: "breadthfirst", directed: true, padding: 55, spacingFactor: 1.55, animate: false}).run(); setTimeout(fitGraph, 100); } }
 
 async function toggleGraphFullscreen() {
     const stage = document.getElementById("graphStage");
