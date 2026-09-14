@@ -5,10 +5,18 @@ from fastapi.middleware.cors import CORSMiddleware
 import heapq
 import json
 import os
+import threading
 import time
 import requests
 from dotenv import load_dotenv
 
+from backend.label_intelligence import (
+    build_vasp_matches,
+    ensure_ready,
+    lookup_addresses,
+    public_intelligence_summary,
+    sync_label_repository,
+)
 from backend.heuristics import (
     analyze_transactions,
     build_evidence_report,
@@ -32,6 +40,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def start_public_label_sync():
+    # Optional background enrichment: deployment remains available even if GitHub
+    # is temporarily unreachable. The live investigation path can use the cached
+    # index or perform a refresh when its TTL expires.
+    threading.Thread(target=sync_label_repository, daemon=True).start()
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
@@ -314,6 +330,12 @@ def evaluation():
     return evaluation_summary(cases)
 
 
+@app.get("/intelligence/status")
+def intelligence_status():
+    """Show public-label sync health without requiring a wallet investigation."""
+    return ensure_ready()
+
+
 @app.get("/investigate/{wallet}")
 def investigate(wallet: str):
     # -------------------- DEMO PATH: EXACTLY PRESERVED --------------------
@@ -363,11 +385,47 @@ def investigate(wallet: str):
                 continue
             category_norm = str(category or "").lower()
             if category_norm in ["cex", "exchange", "centralized_exchange", "custodian"]:
-                external_vasp_matches.append({"address": address, "entity": label, "category": category, "aml_score": entity.get("aml_score", 0)})
+                external_vasp_matches.append({"address": address, "entity": label, "category": category, "aml_score": entity.get("aml_score", 0), "source": "PublicAML"})
             if "mixer" in category_norm:
                 trail_breaks.append({"type": "mixer", "address": address, "severity": "high", "reason": "external intelligence classifies an observed address as mixer-like"})
             if "bridge" in category_norm:
                 trail_breaks.append({"type": "bridge", "address": address, "severity": "medium", "reason": "external intelligence classifies an observed address as bridge-like"})
+
+        # -------------------- ADDITIVE PUBLIC LABEL INTELLIGENCE --------------------
+        # This is an enrichment layer only. It does not replace Etherscan tracing,
+        # behavioral analysis, PublicAML, or the existing VASP engine.
+        public_label_matches = lookup_addresses(list(addresses))
+        public_label_intel = public_intelligence_summary(public_label_matches)
+        public_vasp_matches = build_vasp_matches(public_label_matches)
+        external_vasp_matches.extend(public_vasp_matches)
+
+        # Use non-VASP public labels as additional trail-break intelligence.
+        for address, labels in public_label_matches.items():
+            for label_info in labels:
+                category = label_info.get("category")
+                if category == "mixer":
+                    trail_breaks.append({"type": "mixer", "address": address, "severity": "high", "reason": "public label intelligence identifies a mixer-related address"})
+                elif category == "bridge":
+                    trail_breaks.append({"type": "bridge", "address": address, "severity": "medium", "reason": "public label intelligence identifies a bridge-related address"})
+                elif category in ["scam_or_malicious", "sanctioned"]:
+                    trail_breaks.append({"type": "risk_label", "address": address, "severity": "high", "reason": f"public label intelligence classifies the address as {category.replace('_', ' ')}"})
+
+        # Avoid double-counting the same labelled address/entity if multiple
+        # intelligence sources agree on it. Source information is retained.
+        deduped_matches = {}
+        for match in external_vasp_matches:
+            key = (str(match.get("address", "")).lower(), str(match.get("entity", "")).strip().lower())
+            if key not in deduped_matches:
+                deduped_matches[key] = dict(match)
+            else:
+                existing = deduped_matches[key]
+                sources = set(existing.get("sources", []))
+                if existing.get("source"):
+                    sources.add(existing["source"])
+                if match.get("source"):
+                    sources.add(match["source"])
+                existing["sources"] = sorted(sources)
+        external_vasp_matches = list(deduped_matches.values())
 
         ranked_vasp_candidates = rank_live_vasp_candidates(addresses, external_vasp_matches, live_deposits, live_hot_wallets, transactions)
         intelligence = analyze_transactions(transactions, [])
@@ -414,6 +472,7 @@ def investigate(wallet: str):
         )
         evidence_report["trail_breaks"] = trail_breaks
         evidence_report["node_classification"] = node_classification
+        evidence_report["public_label_intelligence"] = public_label_intel
         evidence_report["performance"] = {"investigation_seconds": round(time.perf_counter() - started, 3), "cache_ttl_seconds": CACHE_TTL}
 
         return {
@@ -422,6 +481,7 @@ def investigate(wallet: str):
             "trace_status": "COMPLETE" if not trace_errors else "PARTIAL",
             "trace_errors": trace_errors,
             "external_intelligence": intelligence_results,
+            "public_label_intelligence": public_label_intel,
             "behavioral_clusters": live_clusters,
             "deposit_analysis": live_deposits,
             "hot_wallet_analysis": live_hot_wallets,

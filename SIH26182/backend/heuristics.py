@@ -443,7 +443,7 @@ def rank_live_vasp_candidates(traced_addresses, external_vasp_matches, deposit_a
 
         if address in traced:
             candidate["evidence_strength"] += 0.45
-            candidate["evidence"].append({"type": "trace_match", "address": address, "weight": 0.45, "reason": "labelled service address is in the observed trace"})
+            candidate["evidence"].append({"type": "trace_match", "address": address, "weight": 0.45, "source": match.get("source", "external intelligence"), "reason": "labelled service address is in the observed trace"})
         if address in deposit_map:
             strength = 0.25 * float(deposit_map[address].get("behavior_score", 0))
             candidate["evidence_strength"] += strength
