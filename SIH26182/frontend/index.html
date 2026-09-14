@@ -86,9 +86,9 @@
                     <span><i class="legend-dot legend-bridge"></i>Bridge</span>
                 </div>
                 <div class="graph-search" role="search" aria-label="Search transaction graph">
-                    <input id="graphSearchInput" type="search" placeholder="Search graph: VASP, hot wallet, deposit..." autocomplete="off" aria-label="Search graph">
-                    <button id="graphSearchBtn" class="graph-search-btn" type="button">SEARCH</button>
-                    <button id="graphSearchClear" class="graph-search-clear hidden" type="button" aria-label="Clear graph search">×</button>
+                    <input id="graphSearchInput" type="search" placeholder="Search graph: VASP, hot wallet, deposit..." autocomplete="off" aria-label="Search graph" onkeydown="handleGraphSearchKey(event)">
+                    <button id="graphSearchBtn" class="graph-search-btn" type="button" onclick="searchTransactionGraph()">SEARCH</button>
+                    <button id="graphSearchClear" class="graph-search-clear hidden" type="button" onclick="clearGraphSearch()" aria-label="Clear graph search">×</button>
                     <span id="graphSearchCount" class="graph-search-count" aria-live="polite"></span>
                 </div>
                 <span class="graph-hint">Click any node or transaction path</span>
