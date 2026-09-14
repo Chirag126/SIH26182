@@ -1,6 +1,7 @@
 let investigationData = null;
 let activeGraph = null;
 let flowOverlayFrame = null;
+let graphSearchPulse = null;
 
 const scenarios = {
     normal: { wallet: "0xABC" },
@@ -214,6 +215,7 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     const depositSet = new Set((analysisData.deposit_analysis?.candidates || []).map(x => String(x.address).toLowerCase()));
     const hotSet = new Set((analysisData.hot_wallet_analysis?.candidates || []).map(x => String(x.address).toLowerCase()));
     const matchedSet = new Set((intelligence.matched_addresses || []).map(x => String(x).toLowerCase()));
+    const vaspName = intelligence.candidate_vasp || analysisData.vasp_candidates?.[0]?.vasp || "VASP";
     const elements = [];
     const nodes = new Set();
 
@@ -235,7 +237,8 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         nodes.add(address);
         const type = inferType(address);
         const cls = classifications.get(String(address).toLowerCase());
-        elements.push({ data: { id: address, address, type, reason: cls?.reason || nodeReason(type), vaspMatch: matchedSet.has(String(address).toLowerCase()) } });
+        const isVasp = matchedSet.has(String(address).toLowerCase());
+        elements.push({ data: { id: address, address, type, reason: cls?.reason || nodeReason(type), vaspMatch: isVasp, vaspName: isVasp ? vaspName : "" } });
     }
 
     transactions.forEach((tx, index) => {
@@ -257,6 +260,8 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         }});
     });
 
+    matchedSet.forEach(address => addNode(address));
+
     const cy = cytoscape({
         container: graphEl,
         elements,
@@ -269,120 +274,25 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
             { selector: 'node[type="mixer"]', style: { "background-color": COLORS.mixer, "border-color": "#ffb16f", "border-width": 4, "opacity": 1 } },
             { selector: 'node[type="bridge"]', style: { "background-color": COLORS.bridge, "border-color": "#d2b7ff", "border-width": 4, "opacity": 1 } },
             { selector: 'node[type="destination"]', style: { "background-color": COLORS.destination, "border-color": "#a9dcff", "border-width": 3, "opacity": 1 } },
+            { selector: "node.search-hit", style: { "border-width": 8, "border-color": "#ffffff", "overlay-color": "#ffffff", "overlay-opacity": 0.22, "opacity": 1 } },
+            { selector: "node.search-hit.search-pulse-off", style: { "border-width": 3, "overlay-opacity": 0, "opacity": 1 } },
+            { selector: "edge.search-hit", style: { "width": 6, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } },
+            { selector: "edge.search-hit.search-pulse-off", style: { "width": 3, "opacity": 0.7 } },
             { selector: "node:selected", style: { "border-width": 6, "border-color": "#ffffff", "opacity": 1 } },
-            { selector: "node.search-match", style: { "border-width": 8, "border-color": "#ffffff", "opacity": 1, "z-index": 999 } },
-            { selector: "node.search-dim", style: { "opacity": 0.16 } },
             { selector: "edge", style: { "width": 2, "line-color": "#49617f", "target-arrow-color": "#49617f", "target-arrow-shape": "triangle", "curve-style": "bezier", "control-point-step-size": 55, "opacity": 0.28 } },
             { selector: 'edge[edgeType="deposit"]', style: { "line-color": COLORS.deposit, "target-arrow-color": COLORS.deposit, "opacity": 0.55 } },
             { selector: 'edge[edgeType="hot"]', style: { "line-color": COLORS.hot, "target-arrow-color": COLORS.hot, "opacity": 0.65 } },
             { selector: 'edge[edgeType="vasp"]', style: { "line-color": COLORS.vasp, "target-arrow-color": COLORS.vasp, "opacity": 0.8 } },
             { selector: 'edge[edgeType="mixer"]', style: { "line-color": COLORS.mixer, "target-arrow-color": COLORS.mixer, "opacity": 0.8 } },
             { selector: 'edge[edgeType="bridge"]', style: { "line-color": COLORS.bridge, "target-arrow-color": COLORS.bridge, "opacity": 0.8 } },
-            { selector: "edge:selected", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } },
-            { selector: "edge.search-match", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } },
-            { selector: "edge.search-dim", style: { "opacity": 0.08 } }
+            { selector: "edge:selected", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } }
         ],
         layout: { name: "breadthfirst", directed: true, padding: 55, spacingFactor: 1.55, animate: true, animationDuration: 450 }
     });
 
-    cy.nodes().forEach(node => node.data("label", shortAddress(node.data("address"))));
+    cy.nodes().forEach(node => node.data("label", nodeTypeLabel(node.data("type"))));
     activeGraph = cy;
     document.getElementById("graphEmpty").classList.toggle("hidden", transactions.length > 0);
-
-    const graphSearchInput = document.getElementById("graphSearchInput");
-    const graphSearchClear = document.getElementById("graphSearchClear");
-    const graphSearchStatus = document.getElementById("graphSearchStatus");
-
-    function normalizeSearch(value) {
-        return String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-    }
-
-    function searchableNodeText(node) {
-        const d = node.data();
-        return [
-            d.address,
-            d.type,
-            nodeTypeLabel(d.type),
-            d.label,
-            d.vaspName,
-            d.reason
-        ].map(normalizeSearch).filter(Boolean);
-    }
-
-    function searchableEdgeText(edge) {
-        const d = edge.data();
-        return [
-            d.tx_hash,
-            d.from,
-            d.to,
-            d.amount,
-            d.chain,
-            d.edgeType,
-            nodeTypeLabel(d.edgeType)
-        ].map(normalizeSearch).filter(Boolean);
-    }
-
-    function runGraphSearch(rawQuery) {
-        if (!activeGraph || activeGraph.destroyed()) return;
-        const query = normalizeSearch(rawQuery);
-        activeGraph.elements().removeClass("search-match search-dim");
-        if (!query) {
-            if (graphSearchStatus) graphSearchStatus.textContent = "";
-            return;
-        }
-
-        const matchingNodes = activeGraph.nodes().filter(node =>
-            searchableNodeText(node).some(value => value.includes(query))
-        );
-        const matchingEdges = activeGraph.edges().filter(edge =>
-            searchableEdgeText(edge).some(value => value.includes(query))
-        );
-        const highlighted = matchingNodes.union(matchingEdges);
-
-        if (!highlighted.length) {
-            activeGraph.elements().addClass("search-dim");
-            if (graphSearchStatus) graphSearchStatus.textContent = "No matches";
-            return;
-        }
-
-        highlighted.addClass("search-match");
-        activeGraph.elements().not(highlighted).addClass("search-dim");
-
-        const connected = matchingEdges.connectedNodes();
-        if (connected.length) connected.addClass("search-match").removeClass("search-dim");
-
-        if (graphSearchStatus) {
-            const parts = [];
-            if (matchingNodes.length) parts.push(`${matchingNodes.length} node${matchingNodes.length === 1 ? "" : "s"}`);
-            if (matchingEdges.length) parts.push(`${matchingEdges.length} transaction${matchingEdges.length === 1 ? "" : "s"}`);
-            graphSearchStatus.textContent = parts.join(" · ");
-        }
-
-        const focus = highlighted.union(connected);
-        if (focus.length === 1) {
-            activeGraph.animate({ center: { eles: focus }, zoom: Math.max(activeGraph.zoom(), 1.15) }, { duration: 250 });
-        } else {
-            activeGraph.fit(focus, 70);
-        }
-    }
-
-    if (graphSearchInput) {
-        graphSearchInput.value = "";
-        graphSearchInput.oninput = () => runGraphSearch(graphSearchInput.value);
-        graphSearchInput.onkeydown = event => {
-            if (event.key === "Escape") {
-                graphSearchInput.value = "";
-                runGraphSearch("");
-            }
-        };
-    }
-    if (graphSearchClear) {
-        graphSearchClear.onclick = () => {
-            if (graphSearchInput) graphSearchInput.value = "";
-            runGraphSearch("");
-            graphSearchInput?.focus();
-        };
-    }
 
     function showPopup(title, rows, element) {
         popupContent.innerHTML = "";
@@ -413,6 +323,75 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     });
     cy.on("tap", event => { if (event.target === cy) closePopup(); });
     popupClose.onclick = closePopup;
+
+    function clearGraphSearch() {
+        if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
+        cy.elements().removeClass("search-hit search-pulse-off");
+        cy.elements().removeStyle("opacity");
+        const input = document.getElementById("graphSearchInput");
+        const clear = document.getElementById("graphSearchClear");
+        const count = document.getElementById("graphSearchCount");
+        if (input) input.value = "";
+        if (clear) clear.classList.add("hidden");
+        if (count) { count.textContent = ""; count.className = "graph-search-count"; }
+    }
+
+    function runGraphSearch() {
+        const input = document.getElementById("graphSearchInput");
+        const clear = document.getElementById("graphSearchClear");
+        const count = document.getElementById("graphSearchCount");
+        const term = (input?.value || "").trim().toLowerCase();
+        if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
+        cy.elements().removeClass("search-hit search-pulse-off");
+        cy.elements().removeStyle("opacity");
+        if (!term) { if (clear) clear.classList.add("hidden"); if (count) { count.textContent = ""; count.className = "graph-search-count"; } return; }
+        if (clear) clear.classList.remove("hidden");
+
+        const aliases = {
+            vasp: ["vasp"], exchange: ["vasp"],
+            hot: ["hot"], "hot wallet": ["hot"], hotwallet: ["hot"],
+            deposit: ["deposit"],
+            wallet: ["wallet", "start", "destination"], investigated: ["start"], start: ["start"],
+            mixer: ["mixer"], bridge: ["bridge"], destination: ["destination"]
+        };
+        const types = aliases[term] || [];
+        const matches = cy.nodes().filter(n => {
+            const d = n.data();
+            const text = [d.type, nodeTypeLabel(d.type), d.address, d.reason, d.vaspName].join(" ").toLowerCase();
+            return types.length ? types.includes(String(d.type).toLowerCase()) : text.includes(term);
+        });
+        const edgeMatches = cy.edges().filter(e => {
+            const d = e.data();
+            const text = [d.tx_hash, d.from, d.to, d.amount, d.chain, d.token, d.edgeType, nodeTypeLabel(d.edgeType)].join(" ").toLowerCase();
+            return text.includes(term);
+        });
+        const matchedElements = matches.union(edgeMatches);
+        if (!matchedElements.length) {
+            if (count) { count.textContent = "No match"; count.className = "graph-search-count none"; }
+            return;
+        }
+        matchedElements.addClass("search-hit");
+        if (count) { count.textContent = `${matchedElements.length} match${matchedElements.length === 1 ? "" : "es"}`; count.className = "graph-search-count match"; }
+        cy.elements().not(matchedElements).style("opacity", 0.12);
+        matchedElements.style("opacity", 1);
+        cy.fit(matchedElements, 100);
+        let on = true;
+        graphSearchPulse = setInterval(() => {
+            on = !on;
+            if (on) matchedElements.removeClass("search-pulse-off");
+            else matchedElements.addClass("search-pulse-off");
+        }, 420);
+    }
+
+    const searchInput = document.getElementById("graphSearchInput");
+    const searchButton = document.getElementById("graphSearchBtn");
+    const searchClear = document.getElementById("graphSearchClear");
+    if (searchButton) searchButton.onclick = runGraphSearch;
+    if (searchInput) {
+        searchInput.oninput = () => { if (!searchInput.value.trim()) clearGraphSearch(); };
+        searchInput.onkeydown = event => { if (event.key === "Enter") runGraphSearch(); if (event.key === "Escape") clearGraphSearch(); };
+    }
+    if (searchClear) searchClear.onclick = clearGraphSearch;
 
     function drawFlowOverlay() {
         overlay.setAttribute("width", graphEl.clientWidth);
