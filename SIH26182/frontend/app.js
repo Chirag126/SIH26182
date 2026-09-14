@@ -214,15 +214,6 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     const depositSet = new Set((analysisData.deposit_analysis?.candidates || []).map(x => String(x.address).toLowerCase()));
     const hotSet = new Set((analysisData.hot_wallet_analysis?.candidates || []).map(x => String(x.address).toLowerCase()));
     const matchedSet = new Set((intelligence.matched_addresses || []).map(x => String(x).toLowerCase()));
-    const vaspCandidates = analysisData.vasp_candidates || [];
-    const vaspByAddress = new Map();
-    vaspCandidates.forEach(candidate => {
-        (candidate.addresses || []).forEach(address => {
-            const key = String(address).toLowerCase();
-            if (!vaspByAddress.has(key)) vaspByAddress.set(key, []);
-            vaspByAddress.get(key).push(candidate);
-        });
-    });
     const elements = [];
     const nodes = new Set();
 
@@ -242,31 +233,10 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     function addNode(address) {
         if (!address || nodes.has(address)) return;
         nodes.add(address);
-        const key = String(address).toLowerCase();
         const type = inferType(address);
-        const cls = classifications.get(key);
-        const matchedCandidates = vaspByAddress.get(key) || [];
-        const vaspName = matchedCandidates[0]?.vasp || intelligence.candidate_vasp || "VASP";
-        const isVaspMatch = matchedSet.has(key) || matchedCandidates.length > 0 || type === "vasp";
-        elements.push({ data: {
-            id: address, address, type,
-            label: type === "vasp" ? "VASP" : "",
-            vaspName,
-            reason: cls?.reason || (type === "vasp" ? `Matched to ${vaspName} by public/service intelligence` : nodeReason(type)),
-            vaspMatch: isVaspMatch
-        } });
+        const cls = classifications.get(String(address).toLowerCase());
+        elements.push({ data: { id: address, address, type, reason: cls?.reason || nodeReason(type), vaspMatch: matchedSet.has(String(address).toLowerCase()) } });
     }
-
-    // VASP candidate addresses come from the already-traced address set.
-    // Ensure every matched address is visible in the graph even if a future
-    // backend response omits its classification entry. No synthetic
-    // blockchain edge is created.
-    vaspCandidates.forEach(candidate => {
-        (candidate.addresses || []).forEach(address => {
-            if (!address || nodes.has(address)) return;
-            addNode(address);
-        });
-    });
 
     transactions.forEach((tx, index) => {
         if (!tx.from || !tx.to) return;
@@ -295,31 +265,124 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
             { selector: 'node[type="start"]', style: { "background-color": COLORS.start, "border-color": "#ffb1c0", "border-width": 4, "width": 76, "height": 76, "opacity": 1 } },
             { selector: 'node[type="deposit"]', style: { "background-color": COLORS.deposit, "border-color": "#ffe08a", "border-width": 4, "opacity": 1 } },
             { selector: 'node[type="hot"]', style: { "background-color": COLORS.hot, "border-color": "#8bf0bd", "border-width": 4, "opacity": 1 } },
-            { selector: 'node[type="vasp"]', style: { "background-color": "#ffffff", "color": "#08111f", "label": "data(label)", "font-size": 11, "font-weight": 900, "border-color": "#ffffff", "border-width": 7, "width": 72, "height": 72, "opacity": 1, "text-outline-width": 0 } },
+            { selector: 'node[type="vasp"]', style: { "background-color": "#eaf2ff", "color": "#08111f", "border-color": "#ffffff", "border-width": 5, "opacity": 1 } },
             { selector: 'node[type="mixer"]', style: { "background-color": COLORS.mixer, "border-color": "#ffb16f", "border-width": 4, "opacity": 1 } },
             { selector: 'node[type="bridge"]', style: { "background-color": COLORS.bridge, "border-color": "#d2b7ff", "border-width": 4, "opacity": 1 } },
             { selector: 'node[type="destination"]', style: { "background-color": COLORS.destination, "border-color": "#a9dcff", "border-width": 3, "opacity": 1 } },
             { selector: "node:selected", style: { "border-width": 6, "border-color": "#ffffff", "opacity": 1 } },
+            { selector: "node.search-match", style: { "border-width": 8, "border-color": "#ffffff", "opacity": 1, "z-index": 999 } },
+            { selector: "node.search-dim", style: { "opacity": 0.16 } },
             { selector: "edge", style: { "width": 2, "line-color": "#49617f", "target-arrow-color": "#49617f", "target-arrow-shape": "triangle", "curve-style": "bezier", "control-point-step-size": 55, "opacity": 0.28 } },
             { selector: 'edge[edgeType="deposit"]', style: { "line-color": COLORS.deposit, "target-arrow-color": COLORS.deposit, "opacity": 0.55 } },
             { selector: 'edge[edgeType="hot"]', style: { "line-color": COLORS.hot, "target-arrow-color": COLORS.hot, "opacity": 0.65 } },
             { selector: 'edge[edgeType="vasp"]', style: { "line-color": COLORS.vasp, "target-arrow-color": COLORS.vasp, "opacity": 0.8 } },
             { selector: 'edge[edgeType="mixer"]', style: { "line-color": COLORS.mixer, "target-arrow-color": COLORS.mixer, "opacity": 0.8 } },
             { selector: 'edge[edgeType="bridge"]', style: { "line-color": COLORS.bridge, "target-arrow-color": COLORS.bridge, "opacity": 0.8 } },
-            { selector: "edge:selected", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } }
+            { selector: "edge:selected", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } },
+            { selector: "edge.search-match", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } },
+            { selector: "edge.search-dim", style: { "opacity": 0.08 } }
         ],
         layout: { name: "breadthfirst", directed: true, padding: 55, spacingFactor: 1.55, animate: true, animationDuration: 450 }
     });
 
-    cy.nodes().forEach(node => {
-        if (node.data("type") === "vasp") {
-            node.data("label", "VASP");
-        } else {
-            node.data("label", "");
-        }
-    });
+    cy.nodes().forEach(node => node.data("label", shortAddress(node.data("address"))));
     activeGraph = cy;
     document.getElementById("graphEmpty").classList.toggle("hidden", transactions.length > 0);
+
+    const graphSearchInput = document.getElementById("graphSearchInput");
+    const graphSearchClear = document.getElementById("graphSearchClear");
+    const graphSearchStatus = document.getElementById("graphSearchStatus");
+
+    function normalizeSearch(value) {
+        return String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    }
+
+    function searchableNodeText(node) {
+        const d = node.data();
+        return [
+            d.address,
+            d.type,
+            nodeTypeLabel(d.type),
+            d.label,
+            d.vaspName,
+            d.reason
+        ].map(normalizeSearch).filter(Boolean);
+    }
+
+    function searchableEdgeText(edge) {
+        const d = edge.data();
+        return [
+            d.tx_hash,
+            d.from,
+            d.to,
+            d.amount,
+            d.chain,
+            d.edgeType,
+            nodeTypeLabel(d.edgeType)
+        ].map(normalizeSearch).filter(Boolean);
+    }
+
+    function runGraphSearch(rawQuery) {
+        if (!activeGraph || activeGraph.destroyed()) return;
+        const query = normalizeSearch(rawQuery);
+        activeGraph.elements().removeClass("search-match search-dim");
+        if (!query) {
+            if (graphSearchStatus) graphSearchStatus.textContent = "";
+            return;
+        }
+
+        const matchingNodes = activeGraph.nodes().filter(node =>
+            searchableNodeText(node).some(value => value.includes(query))
+        );
+        const matchingEdges = activeGraph.edges().filter(edge =>
+            searchableEdgeText(edge).some(value => value.includes(query))
+        );
+        const highlighted = matchingNodes.union(matchingEdges);
+
+        if (!highlighted.length) {
+            activeGraph.elements().addClass("search-dim");
+            if (graphSearchStatus) graphSearchStatus.textContent = "No matches";
+            return;
+        }
+
+        highlighted.addClass("search-match");
+        activeGraph.elements().not(highlighted).addClass("search-dim");
+
+        const connected = matchingEdges.connectedNodes();
+        if (connected.length) connected.addClass("search-match").removeClass("search-dim");
+
+        if (graphSearchStatus) {
+            const parts = [];
+            if (matchingNodes.length) parts.push(`${matchingNodes.length} node${matchingNodes.length === 1 ? "" : "s"}`);
+            if (matchingEdges.length) parts.push(`${matchingEdges.length} transaction${matchingEdges.length === 1 ? "" : "s"}`);
+            graphSearchStatus.textContent = parts.join(" · ");
+        }
+
+        const focus = highlighted.union(connected);
+        if (focus.length === 1) {
+            activeGraph.animate({ center: { eles: focus }, zoom: Math.max(activeGraph.zoom(), 1.15) }, { duration: 250 });
+        } else {
+            activeGraph.fit(focus, 70);
+        }
+    }
+
+    if (graphSearchInput) {
+        graphSearchInput.value = "";
+        graphSearchInput.oninput = () => runGraphSearch(graphSearchInput.value);
+        graphSearchInput.onkeydown = event => {
+            if (event.key === "Escape") {
+                graphSearchInput.value = "";
+                runGraphSearch("");
+            }
+        };
+    }
+    if (graphSearchClear) {
+        graphSearchClear.onclick = () => {
+            if (graphSearchInput) graphSearchInput.value = "";
+            runGraphSearch("");
+            graphSearchInput?.focus();
+        };
+    }
 
     function showPopup(title, rows, element) {
         popupContent.innerHTML = "";
@@ -338,16 +401,9 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
 
     cy.on("tap", "node", event => {
         const n = event.target; const d = n.data();
-        const popupTitle = d.type === "vasp" ? "VASP INFRASTRUCTURE" : "WALLET / ENTITY";
-        const popupRows = [
-            ["Type", nodeTypeLabel(d.type)],
-            ...(d.type === "vasp" ? [["VASP", d.vaspName || intelligence.candidate_vasp || "Unknown"]] : []),
-            ["Address", d.address],
-            ["Incoming", n.incomers("edge").length],
-            ["Outgoing", n.outgoers("edge").length],
-            ["Why classified", d.reason || "Observed address"]
-        ];
-        showPopup(popupTitle, popupRows.map(([label, value]) => ({label, value})), n);
+        showPopup("WALLET / ENTITY", [
+            ["Type", nodeTypeLabel(d.type)], ["Address", d.address], ["Incoming", n.incomers("edge").length], ["Outgoing", n.outgoers("edge").length], ["Why classified", d.reason || "Observed address"]
+        ].map(([label, value]) => ({label, value})), n);
     });
     cy.on("tap", "edge", event => {
         const e = event.target; const d = e.data();

@@ -85,6 +85,11 @@
                     <span><i class="legend-dot legend-mixer"></i>Mixer</span>
                     <span><i class="legend-dot legend-bridge"></i>Bridge</span>
                 </div>
+                <div class="graph-search">
+                    <input id="graphSearchInput" type="search" placeholder="Search VASP, wallet, hot wallet..." aria-label="Search transaction graph" autocomplete="off">
+                    <button id="graphSearchClear" type="button" title="Clear graph search" aria-label="Clear graph search">×</button>
+                </div>
+                <span id="graphSearchStatus" class="graph-search-status" aria-live="polite"></span>
                 <span class="graph-hint">Click any node or transaction path</span>
             </div>
             <div id="graphStage">
@@ -116,7 +121,7 @@
 
         <div class="dashboard-grid">
             <div class="panel-card">
-                <div class="card-heading"><div><div class="eyebrow">COMPETING HYPOTHESES</div><h2>VASP Evidence Strength</h2></div></div>
+                <div class="card-heading"><div><div class="eyebrow">COMPETING HYPOTHESES</div><h2>VASP Ranking</h2></div></div>
                 <div id="vaspCandidates" class="candidate-list"></div>
             </div>
             <div class="panel-card">
