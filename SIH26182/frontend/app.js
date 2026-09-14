@@ -151,14 +151,26 @@ function renderTrailBreaks(breaks, intelligence) {
         container.appendChild(makeEmpty("No mixer or bridge trail-break was detected."));
         return;
     }
-    breaks.slice(0, 8).forEach(item => {
+
+    // Group repeated intelligence messages so the same signal is shown once.
+    // This is UI-only: underlying evidence, addresses and scoring are unchanged.
+    const grouped = new Map();
+    breaks.forEach(item => {
+        const type = String(item.type || "trail").toLowerCase();
+        const reason = String(item.reason || "Trail uncertainty detected");
+        const key = `${type}|${reason}`;
+        if (!grouped.has(key)) grouped.set(key, { ...item, _count: 0 });
+        grouped.get(key)._count += 1;
+    });
+
+    Array.from(grouped.values()).slice(0, 8).forEach(item => {
         const row = document.createElement("div");
         row.className = `trail-item ${item.type === "mixer" ? "danger" : item.type === "bridge" ? "caution" : "neutral"}`;
-        row.innerHTML = `<span class="trail-icon">${item.type === "mixer" ? "⚠" : item.type === "bridge" ? "↗" : "•"}</span><div><strong>${escapeHtml((item.type || "Trail").toUpperCase())}</strong><small>${escapeHtml(item.reason || "Trail uncertainty detected")}</small></div>`;
+        const countText = item._count > 1 ? ` · ${item._count} observed address(es)` : "";
+        row.innerHTML = `<span class="trail-icon">${item.type === "mixer" ? "⚠" : item.type === "bridge" ? "↗" : "•"}</span><div><strong>${escapeHtml((item.type || "Trail").toUpperCase())}</strong><small>${escapeHtml(item.reason || "Trail uncertainty detected")}${escapeHtml(countText)}</small></div>`;
         container.appendChild(row);
     });
 }
-
 function renderQuality(data) {
     const report = data.investigation_report || {};
     const quality = report.data_quality || {};

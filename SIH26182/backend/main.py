@@ -449,8 +449,8 @@ def investigate(wallet: str):
             live_findings.append({"name": f"{live_hot_wallets['count']} hot-wallet candidate(s) detected from consolidation behavior", "status": "positive", "points": 0})
         if ranked_vasp_candidates:
             live_findings.append({"name": f"Top VASP candidate supported by {len(ranked_vasp_candidates[0]['evidence'])} evidence item(s)", "status": "positive", "points": 0})
-        for trail in trail_breaks[:5]:
-            live_findings.append({"name": trail.get("reason", f"{trail.get('type', 'trail').title()} trail break detected"), "status": "warning", "points": 0})
+        # Trail-break details are rendered in the dedicated "Uncertainty & Breaks"
+        # panel below, so do not repeat the same warnings in Findings.
         if trace_errors:
             live_findings.append({"name": f"{len(trace_errors)} downstream lookup(s) were incomplete", "status": "warning", "points": 0})
         if intelligence_error:
