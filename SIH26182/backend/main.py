@@ -59,6 +59,7 @@ PAGE_SIZE = 50
 PUBLICAML_URL = "https://intelapi.publicaml.org/v1/enrich"
 CACHE_TTL = 120
 _ACTIVITY_CACHE = {}
+_INVESTIGATION_CACHE = {}
 
 
 def _cache_get(key):
@@ -73,6 +74,20 @@ def _cache_get(key):
 
 def _cache_put(key, value):
     _ACTIVITY_CACHE[key] = {"time": time.time(), "value": value}
+
+
+def _cache_get_investigation(key):
+    item = _INVESTIGATION_CACHE.get(key)
+    if not item:
+        return None
+    if time.time() - item["time"] > CACHE_TTL:
+        _INVESTIGATION_CACHE.pop(key, None)
+        return None
+    return item["value"]
+
+
+def _cache_put_investigation(key, value):
+    _INVESTIGATION_CACHE[key] = {"time": time.time(), "value": value}
 
 
 def get_publicaml_intelligence(addresses):
@@ -319,7 +334,7 @@ def home():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "CryptoTrace AI", "version": app.version, "etherscan_configured": bool(ETHERSCAN_API_KEY), "cache_entries": len(_ACTIVITY_CACHE)}
+    return {"status": "ok", "service": "CryptoTrace AI", "version": app.version, "etherscan_configured": bool(ETHERSCAN_API_KEY), "cache_entries": len(_ACTIVITY_CACHE), "investigation_cache_entries": len(_INVESTIGATION_CACHE)}
 
 
 @app.get("/evaluation")
@@ -360,6 +375,11 @@ def investigate(wallet: str):
             "transactions": [], "transaction_count": 0, "address_count": 0, "cluster_count": 0,
             "intelligence": {"candidate_vasp": "INCONCLUSIVE", "confidence": 0, "findings": [{"name": "Invalid Ethereum wallet address", "status": "warning", "points": 0}], "deposit_candidates": [], "hot_wallets": [], "cluster_size": 0, "mixer_detected": False, "bridge_detected": False},
         }
+
+    investigation_key = f"investigation:{wallet.lower()}"
+    cached_investigation = _cache_get_investigation(investigation_key)
+    if cached_investigation is not None:
+        return cached_investigation
 
     try:
         started = time.perf_counter()
@@ -475,7 +495,7 @@ def investigate(wallet: str):
         evidence_report["public_label_intelligence"] = public_label_intel
         evidence_report["performance"] = {"investigation_seconds": round(time.perf_counter() - started, 3), "cache_ttl_seconds": CACHE_TTL}
 
-        return {
+        live_result = {
             "wallet": wallet,
             "source": "LIVE BLOCKCHAIN + PUBLIC INTELLIGENCE",
             "trace_status": "COMPLETE" if not trace_errors else "PARTIAL",
@@ -495,6 +515,12 @@ def investigate(wallet: str):
             "cluster_count": live_clusters["count"],
             "intelligence": intelligence,
         }
+        # Cache the complete evidence snapshot so repeated scans of the same live
+        # wallet within the TTL return the exact same investigation result. This
+        # is evidence caching, not hardcoded attribution; a later refresh rebuilds
+        # the investigation from current blockchain/intelligence data.
+        _cache_put_investigation(investigation_key, live_result)
+        return live_result
     except Exception as error:
         print(f"[INVESTIGATION ERROR] {error}")
         return {

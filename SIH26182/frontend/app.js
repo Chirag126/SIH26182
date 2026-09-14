@@ -199,182 +199,6 @@ function renderQuality(data) {
     }
 }
 
-
-function clearGraphSearch() {
-    if (graphSearchPulse) {
-        clearInterval(graphSearchPulse);
-        graphSearchPulse = null;
-    }
-    const cy = activeGraph;
-    if (cy) {
-        cy.elements().removeClass("search-hit search-pulse-off");
-        cy.elements().removeStyle("opacity");
-        cy.elements().removeStyle("border-width border-color overlay-color overlay-opacity width line-color target-arrow-color");
-    }
-    const input = document.getElementById("graphSearchInput");
-    const clear = document.getElementById("graphSearchClear");
-    const count = document.getElementById("graphSearchCount");
-    if (input) input.value = "";
-    if (clear) clear.classList.add("hidden");
-    if (count) {
-        count.textContent = "";
-        count.className = "graph-search-count";
-    }
-}
-
-function searchTransactionGraph() {
-    const cy = activeGraph;
-    const input = document.getElementById("graphSearchInput");
-    const clear = document.getElementById("graphSearchClear");
-    const count = document.getElementById("graphSearchCount");
-
-    if (graphSearchPulse) {
-        clearInterval(graphSearchPulse);
-        graphSearchPulse = null;
-    }
-    if (!cy) {
-        if (count) {
-            count.textContent = "Run an investigation first";
-            count.className = "graph-search-count none";
-        }
-        return;
-    }
-
-    const term = (input?.value || "").trim().toLowerCase();
-    cy.elements().removeClass("search-hit search-pulse-off");
-    cy.elements().removeStyle("opacity");
-    cy.elements().removeStyle("border-width border-color overlay-color overlay-opacity width line-color target-arrow-color");
-
-    if (!term) {
-        if (clear) clear.classList.add("hidden");
-        if (count) {
-            count.textContent = "";
-            count.className = "graph-search-count";
-        }
-        return;
-    }
-    if (clear) clear.classList.remove("hidden");
-
-    const aliases = {
-        vasp: ["vasp"],
-        exchange: ["vasp"],
-        exchanges: ["vasp"],
-        "hot wallet": ["hot"],
-        "hot wallets": ["hot"],
-        hotwallet: ["hot"],
-        hot: ["hot"],
-        deposit: ["deposit"],
-        deposits: ["deposit"],
-        wallet: ["wallet", "start", "destination"],
-        wallets: ["wallet", "start", "destination"],
-        investigated: ["start"],
-        "investigated wallet": ["start"],
-        start: ["start"],
-        mixer: ["mixer"],
-        mixers: ["mixer"],
-        bridge: ["bridge"],
-        bridges: ["bridge"],
-        destination: ["destination"],
-        destinations: ["destination"]
-    };
-
-    const types = aliases[term] || [];
-    const matches = cy.nodes().filter(node => {
-        const d = node.data();
-        const text = [
-            d.type,
-            nodeTypeLabel(d.type),
-            d.address,
-            d.reason,
-            d.vaspName,
-            d.vaspMatch ? "vasp" : ""
-        ].join(" ").toLowerCase();
-
-        return types.length
-            ? types.includes(String(d.type || "").toLowerCase())
-            : text.includes(term);
-    });
-
-    const edgeMatches = cy.edges().filter(edge => {
-        const d = edge.data();
-        const text = [
-            d.tx_hash,
-            d.from,
-            d.to,
-            d.amount,
-            d.chain,
-            d.token,
-            d.edgeType,
-            nodeTypeLabel(d.edgeType)
-        ].join(" ").toLowerCase();
-        return text.includes(term);
-    });
-
-    const matchedNodes = matches;
-    const matchedEdges = edgeMatches;
-    const matchedElements = matchedNodes.union(matchedEdges);
-
-    if (!matchedElements.length) {
-        if (count) {
-            count.textContent = "No match";
-            count.className = "graph-search-count none";
-        }
-        return;
-    }
-
-    const nodeMatches = matchedNodes;
-    const edgeMatchesFinal = matchedEdges;
-
-    matchedElements.addClass("search-hit");
-    cy.elements().not(matchedElements).style("opacity", 0.10);
-    matchedElements.style("opacity", 1);
-
-    if (count) {
-        count.textContent = `${matchedElements.length} match${matchedElements.length === 1 ? "" : "es"}`;
-        count.className = "graph-search-count match";
-    }
-
-    cy.fit(matchedElements, 100);
-
-    // Use direct Cytoscape styles for the pulse instead of relying on
-    // CSS animation, which cannot animate Cytoscape's canvas-rendered nodes.
-    let pulseOn = true;
-    const pulse = () => {
-        pulseOn = !pulseOn;
-
-        nodeMatches.style({
-            "border-width": pulseOn ? 11 : 4,
-            "border-color": "#ffffff",
-            "overlay-color": "#ffffff",
-            "overlay-opacity": pulseOn ? 0.55 : 0.05,
-            "opacity": 1
-        });
-
-        edgeMatchesFinal.style({
-            "width": pulseOn ? 7 : 2,
-            "line-color": pulseOn ? "#ffffff" : "#9bb6d6",
-            "target-arrow-color": pulseOn ? "#ffffff" : "#9bb6d6",
-            "opacity": pulseOn ? 1 : 0.55
-        });
-
-        // Keep non-matches dimmed during every pulse cycle.
-        cy.elements().not(matchedElements).style("opacity", 0.10);
-    };
-
-    pulse();
-    graphSearchPulse = setInterval(pulse, 500);
-}
-
-function handleGraphSearchKey(event) {
-    if (event.key === "Enter") {
-        event.preventDefault();
-        searchTransactionGraph();
-    } else if (event.key === "Escape") {
-        event.preventDefault();
-        clearGraphSearch();
-    }
-}
-
 function drawGraph(transactions, startingWallet, analysisData = {}) {
     if (flowOverlayFrame) cancelAnimationFrame(flowOverlayFrame);
     if (activeGraph) activeGraph.destroy();
@@ -499,6 +323,148 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     });
     cy.on("tap", event => { if (event.target === cy) closePopup(); });
     popupClose.onclick = closePopup;
+
+    function clearGraphSearch() {
+        if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
+        cy.elements().removeStyle("opacity border-width border-color background-color overlay-color overlay-opacity width line-color target-arrow-color");
+        cy.elements().removeClass("search-hit search-pulse-off");
+        const input = document.getElementById("graphSearchInput");
+        const clear = document.getElementById("graphSearchClear");
+        const count = document.getElementById("graphSearchCount");
+        if (input) input.value = "";
+        if (clear) clear.classList.add("hidden");
+        if (count) { count.textContent = ""; count.className = "graph-search-count"; }
+    }
+
+    function runGraphSearch() {
+        if (!activeGraph || activeGraph !== cy) return;
+        const input = document.getElementById("graphSearchInput");
+        const clear = document.getElementById("graphSearchClear");
+        const count = document.getElementById("graphSearchCount");
+        const term = (input?.value || "").trim().toLowerCase();
+
+        if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
+        cy.elements().removeClass("search-hit search-pulse-off");
+        cy.elements().removeStyle("opacity border-width border-color background-color overlay-color overlay-opacity width line-color target-arrow-color");
+
+        if (!term) {
+            if (clear) clear.classList.add("hidden");
+            if (count) { count.textContent = ""; count.className = "graph-search-count"; }
+            return;
+        }
+        if (clear) clear.classList.remove("hidden");
+
+        // Category searches are intentionally broad so judges can type either
+        // the legend text or a shortened version such as "hot".
+        const category =
+            term.includes("vasp") || term.includes("exchange") || term.includes("cex") ? "vasp" :
+            term.includes("hot wallet") || term === "hotwallet" || term === "hot" ? "hot" :
+            term.includes("deposit") ? "deposit" :
+            term.includes("mixer") ? "mixer" :
+            term.includes("bridge") ? "bridge" :
+            term.includes("investigated") || term === "start" || term.includes("target") ? "start" :
+            term.includes("destination") ? "destination" :
+            term === "wallet" ? "wallet" : null;
+
+        const normalize = value => String(value ?? "").toLowerCase();
+        const matches = cy.nodes().filter(node => {
+            const d = node.data();
+            const type = normalize(d.type);
+            if (category) return type === category;
+            const searchable = [
+                d.address, d.type, nodeTypeLabel(d.type), d.reason,
+                d.vaspName, d.vaspMatch ? "vasp" : "", d.label
+            ].map(normalize).join(" ");
+            return searchable.includes(term);
+        });
+
+        const edgeMatches = cy.edges().filter(edge => {
+            const d = edge.data();
+            const searchable = [
+                d.tx_hash, d.from, d.to, d.amount, d.chain,
+                d.token, d.edgeType, nodeTypeLabel(d.edgeType)
+            ].map(normalize).join(" ");
+            return !category && searchable.includes(term);
+        });
+
+        const matchedElements = matches.union(edgeMatches);
+        if (!matchedElements.length) {
+            if (count) { count.textContent = "No match"; count.className = "graph-search-count none"; }
+            return;
+        }
+
+        // Dim the rest of the graph. Direct Cytoscape styles are used here
+        // rather than relying only on stylesheet classes, making the effect
+        // reliable across Cytoscape versions and graph redraws.
+        cy.elements().not(matchedElements).style("opacity", 0.10);
+        matchedElements.style("opacity", 1);
+        matchedElements.addClass("search-hit");
+        cy.fit(matchedElements, 110);
+
+        if (count) {
+            count.textContent = `${matchedElements.length} match${matchedElements.length === 1 ? "" : "es"}`;
+            count.className = "graph-search-count match";
+        }
+
+        const pulseNodes = matches;
+        const pulseEdges = edgeMatches;
+        let phase = false;
+        const applyPulse = () => {
+            phase = !phase;
+            if (pulseNodes.length) {
+                pulseNodes.forEach(node => {
+                    const type = normalize(node.data("type"));
+                    if (phase) {
+                        node.style({
+                            "opacity": 1,
+                            "border-width": type === "vasp" ? 12 : 10,
+                            "border-color": "#ffffff",
+                            ...(type === "vasp" ? { "background-color": "#ffffff" } : {}),
+                            "overlay-color": "#ffffff",
+                            "overlay-opacity": 0.78
+                        });
+                    } else {
+                        node.style({
+                            "opacity": 1,
+                            "border-width": type === "vasp" ? 5 : 4,
+                            "border-color": type === "vasp" ? "#7dd3fc" : "#ffffff",
+                            ...(type === "vasp" ? { "background-color": "#eaf2ff" } : {}),
+                            "overlay-color": "#ffffff",
+                            "overlay-opacity": 0.08
+                        });
+                    }
+                });
+            }
+            if (pulseEdges.length) {
+                pulseEdges.forEach(edge => {
+                    edge.style({
+                        "opacity": phase ? 1 : 0.72,
+                        "width": phase ? 8 : 3,
+                        "line-color": "#ffffff",
+                        "target-arrow-color": "#ffffff"
+                    });
+                });
+            }
+        };
+        applyPulse();
+        graphSearchPulse = setInterval(applyPulse, 420);
+    }
+
+    const searchInput = document.getElementById("graphSearchInput");
+    const searchButton = document.getElementById("graphSearchBtn");
+    const searchClear = document.getElementById("graphSearchClear");
+    if (searchButton) searchButton.onclick = runGraphSearch;
+    if (searchInput) {
+        searchInput.oninput = () => {
+            if (!searchInput.value.trim()) clearGraphSearch();
+            else runGraphSearch();
+        };
+        searchInput.onkeydown = event => {
+            if (event.key === "Enter") { event.preventDefault(); runGraphSearch(); }
+            if (event.key === "Escape") { event.preventDefault(); clearGraphSearch(); }
+        };
+    }
+    if (searchClear) searchClear.onclick = clearGraphSearch;
 
     function drawFlowOverlay() {
         overlay.setAttribute("width", graphEl.clientWidth);
