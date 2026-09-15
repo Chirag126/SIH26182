@@ -242,9 +242,22 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         elements.push({ data: { id: address, address, type, reason: cls?.reason || nodeReason(type), vaspMatch: isVasp, vaspName: isVasp ? vaspName : "" } });
     }
 
+    // Keep the visual graph bounded: the underlying transaction table/data remains complete.
+    // This prevents dense real-wallet investigations from turning into a giant force graph.
+    const MAX_VISUAL_EDGES = 90;
+    const MAX_VISUAL_NODES = 90;
+    const visibleTransactions = [];
     transactions.forEach((tx, index) => {
-        if (!tx.from || !tx.to) return;
-        addNode(tx.from); addNode(tx.to);
+        if (visibleTransactions.length >= MAX_VISUAL_EDGES || !tx.from || !tx.to) return;
+        const a = String(tx.from), b = String(tx.to);
+        const newCount = (nodes.has(a) ? 0 : 1) + (nodes.has(b) ? 0 : 1);
+        if (nodes.size + newCount > MAX_VISUAL_NODES) return;
+        addNode(a); addNode(b);
+        visibleTransactions.push([tx, index]);
+    });
+
+    // Add the selected transactions after node admission so the visual graph stays bounded.
+    visibleTransactions.forEach(([tx, index]) => {
         const edgeType = inferType(tx.to);
         elements.push({ data: {
             id: tx.tx_hash || `edge-${index}`,
@@ -261,7 +274,43 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         }});
     });
 
-    matchedSet.forEach(address => addNode(address));
+    // Keep matched VASP infrastructure visible, but do not create synthetic edges.
+    matchedSet.forEach(address => {
+        if (nodes.size < MAX_VISUAL_NODES) addNode(address);
+    });
+
+    // Compact layered starting positions make the force simulation settle around the fund flow,
+    // instead of producing the scattered rows caused by a randomized force start.
+    const depth = new Map([[String(startingWallet).toLowerCase(), 0]]);
+    const queue = [String(startingWallet).toLowerCase()];
+    const adjacency = new Map();
+    elements.filter(e => e.data.source && e.data.target).forEach(e => {
+        const a = String(e.data.source).toLowerCase(), b = String(e.data.target).toLowerCase();
+        if (!adjacency.has(a)) adjacency.set(a, []); if (!adjacency.has(b)) adjacency.set(b, []);
+        adjacency.get(a).push(b); adjacency.get(b).push(a);
+    });
+    while (queue.length) {
+        const a = queue.shift();
+        (adjacency.get(a) || []).forEach(b => {
+            if (!depth.has(b)) { depth.set(b, depth.get(a) + 1); queue.push(b); }
+        });
+    }
+    let maxDepth = Math.max(0, ...Array.from(depth.values()));
+    const unplaced = Array.from(nodes).filter(a => !depth.has(String(a).toLowerCase()));
+    unplaced.forEach((a, i) => depth.set(String(a).toLowerCase(), maxDepth + 1 + Math.floor(i / 12)));
+    maxDepth = Math.max(...Array.from(depth.values()));
+    const layers = new Map();
+    nodes.forEach(a => { const d = depth.get(String(a).toLowerCase()) ?? maxDepth; if (!layers.has(d)) layers.set(d, []); layers.get(d).push(a); });
+    const layerGap = Math.max(115, Math.min(175, 900 / Math.max(1, maxDepth + 1)));
+    const rowGap = 78;
+    const centerY = 300;
+    const positions = new Map();
+    layers.forEach((items, d) => {
+        items.sort((a, b) => String(a).localeCompare(String(b)));
+        const span = (items.length - 1) * rowGap;
+        items.forEach((a, i) => positions.set(a, { x: 90 + d * layerGap, y: centerY - span / 2 + i * rowGap }));
+    });
+    elements.forEach(e => { if (e.data.address) e.position = positions.get(e.data.address) || { x: 100, y: 100 }; });
 
     const cy = cytoscape({
         container: graphEl,
@@ -291,18 +340,18 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         layout: {
             name: "cose",
             directed: true,
-            padding: 45,
+            padding: 35,
             animate: true,
-            animationDuration: 650,
+            animationDuration: 450,
             randomize: false,
             fit: true,
-            nodeRepulsion: 7000,
-            idealEdgeLength: 105,
-            edgeElasticity: 0.28,
-            nestingFactor: 0.8,
-            gravity: 0.35,
-            numIter: 120,
-            initialEnergyOnIncremental: 0.4
+            nodeRepulsion: 2600,
+            idealEdgeLength: 92,
+            edgeElasticity: 0.34,
+            nestingFactor: 0.7,
+            gravity: 0.75,
+            numIter: 70,
+            initialEnergyOnIncremental: 0.25
         }
     });
 
@@ -316,7 +365,7 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     motionCanvas.setAttribute("aria-hidden", "true");
     graphEl.appendChild(motionCanvas);
     const motionCtx = motionCanvas.getContext("2d");
-    const motionEdges = cy.edges().slice(0, 18);
+    const motionEdges = cy.edges().slice(0, 10);
     const particles = motionEdges.map((edge, index) => ({
         edge,
         offset: (index / Math.max(1, motionEdges.length)) * 0.9,
@@ -337,7 +386,7 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         if (!motionCtx) return;
         const rect = graphEl.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
-        if (now - graphMotionLast < 40) {
+        if (now - graphMotionLast < 55) {
             graphMotionFrame = requestAnimationFrame(drawMotion);
             return;
         }
@@ -356,11 +405,20 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
             const x = source.x + (target.x - source.x) * t;
             const y = source.y + (target.y - source.y) * t;
 
+            const dx = target.x - source.x, dy = target.y - source.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const trail = 11;
             motionCtx.beginPath();
-            motionCtx.arc(x, y, 2.1, 0, Math.PI * 2);
-            motionCtx.fillStyle = "rgba(220,245,255,0.95)";
-            motionCtx.shadowBlur = 8;
-            motionCtx.shadowColor = "rgba(110,220,255,0.9)";
+            motionCtx.moveTo(x - (dx / len) * trail, y - (dy / len) * trail);
+            motionCtx.lineTo(x, y);
+            motionCtx.lineWidth = 2;
+            motionCtx.strokeStyle = "rgba(180,235,255,0.42)";
+            motionCtx.shadowBlur = 5;
+            motionCtx.shadowColor = "rgba(110,220,255,0.65)";
+            motionCtx.stroke();
+            motionCtx.beginPath();
+            motionCtx.arc(x, y, 1.8, 0, Math.PI * 2);
+            motionCtx.fillStyle = "rgba(235,250,255,0.95)";
             motionCtx.fill();
             motionCtx.shadowBlur = 0;
         });
@@ -405,6 +463,20 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     });
     cy.on("tap", event => { if (event.target === cy) closePopup(); });
     popupClose.onclick = closePopup;
+
+    // A short physics pass after dragging makes the surrounding network react naturally,
+    // without keeping a full force simulation running continuously.
+    let dragTimer = null;
+    cy.on("free", "node", event => {
+        clearTimeout(dragTimer);
+        dragTimer = setTimeout(() => {
+            if (!activeGraph || activeGraph.destroyed()) return;
+            activeGraph.layout({ name: "cose", directed: true, padding: 35, animate: true,
+                animationDuration: 280, randomize: false, fit: false, nodeRepulsion: 2200,
+                idealEdgeLength: 88, edgeElasticity: 0.38, gravity: 0.7, numIter: 32,
+                initialEnergyOnIncremental: 0.18 }).run();
+        }, 70);
+    });
 
     function clearGraphSearch() {
         if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
@@ -479,7 +551,13 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
 }
 
 function fitGraph() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.fit(undefined, 55); } }
-function resetGraphView() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.layout({name: "cose", directed: true, padding: 45, animate: true, animationDuration: 500, randomize: false, nodeRepulsion: 7000, idealEdgeLength: 105, edgeElasticity: 0.28, gravity: 0.35, numIter: 90}).run(); setTimeout(fitGraph, 100); } }
+function resetGraphView() {
+    if (!activeGraph || activeGraph.destroyed()) return;
+    activeGraph.layout({ name: "cose", directed: true, padding: 35, animate: true, animationDuration: 400,
+        randomize: false, nodeRepulsion: 2600, idealEdgeLength: 92, edgeElasticity: 0.34,
+        gravity: 0.75, numIter: 55, initialEnergyOnIncremental: 0.2 }).run();
+    setTimeout(fitGraph, 120);
+}
 
 async function toggleGraphFullscreen() {
     const stage = document.getElementById("graphStage");
