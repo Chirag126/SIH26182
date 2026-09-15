@@ -200,15 +200,12 @@ function renderQuality(data) {
 }
 
 function drawGraph(transactions, startingWallet, analysisData = {}) {
-    if (flowOverlayFrame) cancelAnimationFrame(flowOverlayFrame);
     if (activeGraph) activeGraph.destroy();
     const graphEl = document.getElementById("graph");
-    const overlay = document.getElementById("graphFlowOverlay");
     const popup = document.getElementById("graphPopup");
     const popupContent = document.getElementById("graphPopupContent");
     const popupClose = document.getElementById("graphPopupClose");
     graphEl.innerHTML = "";
-    overlay.innerHTML = "";
 
     const intelligence = analysisData.intelligence || {};
     const classifications = new Map((analysisData.node_classification || []).map(x => [String(x.address).toLowerCase(), x]));
@@ -266,8 +263,8 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         container: graphEl,
         elements,
         style: [
-            { selector: "node", style: { "background-color": COLORS.wallet, "label": "data(label)", "color": "#eaf2ff", "text-valign": "center", "text-halign": "center", "font-size": 9, "font-weight": 700, "text-wrap": "wrap", "text-max-width": 78, "width": 64, "height": 64, "border-width": 2, "border-color": "#4c6485", "opacity": 0.82, "overlay-opacity": 0 } },
-            { selector: 'node[type="start"]', style: { "background-color": COLORS.start, "border-color": "#ffb1c0", "border-width": 4, "width": 76, "height": 76, "opacity": 1 } },
+            { selector: "node", style: { "background-color": COLORS.wallet, "label": "data(label)", "color": "#eaf2ff", "text-valign": "center", "text-halign": "center", "font-size": 8, "font-weight": 700, "text-wrap": "wrap", "text-max-width": 78, "width": 48, "height": 48, "border-width": 2, "border-color": "#4c6485", "opacity": 0.82, "overlay-opacity": 0 } },
+            { selector: 'node[type="start"]', style: { "background-color": COLORS.start, "border-color": "#ffb1c0", "border-width": 4, "width": 58, "height": 58, "opacity": 1 } },
             { selector: 'node[type="deposit"]', style: { "background-color": COLORS.deposit, "border-color": "#ffe08a", "border-width": 4, "opacity": 1 } },
             { selector: 'node[type="hot"]', style: { "background-color": COLORS.hot, "border-color": "#8bf0bd", "border-width": 4, "opacity": 1 } },
             { selector: 'node[type="vasp"]', style: { "background-color": "#eaf2ff", "color": "#08111f", "border-color": "#ffffff", "border-width": 5, "opacity": 1 } },
@@ -279,7 +276,7 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
             { selector: "edge.search-hit", style: { "width": 6, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } },
             { selector: "edge.search-hit.search-pulse-off", style: { "width": 3, "opacity": 0.7 } },
             { selector: "node:selected", style: { "border-width": 6, "border-color": "#ffffff", "opacity": 1 } },
-            { selector: "edge", style: { "width": 2, "line-color": "#49617f", "target-arrow-color": "#49617f", "target-arrow-shape": "triangle", "curve-style": "bezier", "control-point-step-size": 55, "opacity": 0.28 } },
+            { selector: "edge", style: { "width": 2, "line-color": "#49617f", "target-arrow-color": "#49617f", "target-arrow-shape": "triangle", "curve-style": "straight", "opacity": 0.28 } },
             { selector: 'edge[edgeType="deposit"]', style: { "line-color": COLORS.deposit, "target-arrow-color": COLORS.deposit, "opacity": 0.55 } },
             { selector: 'edge[edgeType="hot"]', style: { "line-color": COLORS.hot, "target-arrow-color": COLORS.hot, "opacity": 0.65 } },
             { selector: 'edge[edgeType="vasp"]', style: { "line-color": COLORS.vasp, "target-arrow-color": COLORS.vasp, "opacity": 0.8 } },
@@ -287,7 +284,7 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
             { selector: 'edge[edgeType="bridge"]', style: { "line-color": COLORS.bridge, "target-arrow-color": COLORS.bridge, "opacity": 0.8 } },
             { selector: "edge:selected", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } }
         ],
-        layout: { name: "breadthfirst", directed: true, padding: 55, spacingFactor: 1.55, animate: true, animationDuration: 450 }
+        layout: { name: "breadthfirst", directed: true, padding: 35, spacingFactor: 1.15, animate: false }
     });
 
     cy.nodes().forEach(node => node.data("label", nodeTypeLabel(node.data("type"))));
@@ -326,8 +323,8 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
 
     function clearGraphSearch() {
         if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
-        cy.elements().removeStyle("opacity border-width border-color background-color overlay-color overlay-opacity width line-color target-arrow-color");
         cy.elements().removeClass("search-hit search-pulse-off");
+        cy.elements().removeStyle("opacity");
         const input = document.getElementById("graphSearchInput");
         const clear = document.getElementById("graphSearchClear");
         const count = document.getElementById("graphSearchCount");
@@ -337,117 +334,50 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     }
 
     function runGraphSearch() {
-        if (!activeGraph || activeGraph !== cy) return;
         const input = document.getElementById("graphSearchInput");
         const clear = document.getElementById("graphSearchClear");
         const count = document.getElementById("graphSearchCount");
         const term = (input?.value || "").trim().toLowerCase();
-
         if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
         cy.elements().removeClass("search-hit search-pulse-off");
-        cy.elements().removeStyle("opacity border-width border-color background-color overlay-color overlay-opacity width line-color target-arrow-color");
-
-        if (!term) {
-            if (clear) clear.classList.add("hidden");
-            if (count) { count.textContent = ""; count.className = "graph-search-count"; }
-            return;
-        }
+        cy.elements().removeStyle("opacity");
+        if (!term) { if (clear) clear.classList.add("hidden"); if (count) { count.textContent = ""; count.className = "graph-search-count"; } return; }
         if (clear) clear.classList.remove("hidden");
 
-        // Category searches are intentionally broad so judges can type either
-        // the legend text or a shortened version such as "hot".
-        const category =
-            term.includes("vasp") || term.includes("exchange") || term.includes("cex") ? "vasp" :
-            term.includes("hot wallet") || term === "hotwallet" || term === "hot" ? "hot" :
-            term.includes("deposit") ? "deposit" :
-            term.includes("mixer") ? "mixer" :
-            term.includes("bridge") ? "bridge" :
-            term.includes("investigated") || term === "start" || term.includes("target") ? "start" :
-            term.includes("destination") ? "destination" :
-            term === "wallet" ? "wallet" : null;
-
-        const normalize = value => String(value ?? "").toLowerCase();
-        const matches = cy.nodes().filter(node => {
-            const d = node.data();
-            const type = normalize(d.type);
-            if (category) return type === category;
-            const searchable = [
-                d.address, d.type, nodeTypeLabel(d.type), d.reason,
-                d.vaspName, d.vaspMatch ? "vasp" : "", d.label
-            ].map(normalize).join(" ");
-            return searchable.includes(term);
+        const aliases = {
+            vasp: ["vasp"], exchange: ["vasp"],
+            hot: ["hot"], "hot wallet": ["hot"], hotwallet: ["hot"],
+            deposit: ["deposit"],
+            wallet: ["wallet", "start", "destination"], investigated: ["start"], start: ["start"],
+            mixer: ["mixer"], bridge: ["bridge"], destination: ["destination"]
+        };
+        const types = aliases[term] || [];
+        const matches = cy.nodes().filter(n => {
+            const d = n.data();
+            const text = [d.type, nodeTypeLabel(d.type), d.address, d.reason, d.vaspName].join(" ").toLowerCase();
+            return types.length ? types.includes(String(d.type).toLowerCase()) : text.includes(term);
         });
-
-        const edgeMatches = cy.edges().filter(edge => {
-            const d = edge.data();
-            const searchable = [
-                d.tx_hash, d.from, d.to, d.amount, d.chain,
-                d.token, d.edgeType, nodeTypeLabel(d.edgeType)
-            ].map(normalize).join(" ");
-            return !category && searchable.includes(term);
+        const edgeMatches = cy.edges().filter(e => {
+            const d = e.data();
+            const text = [d.tx_hash, d.from, d.to, d.amount, d.chain, d.token, d.edgeType, nodeTypeLabel(d.edgeType)].join(" ").toLowerCase();
+            return text.includes(term);
         });
-
         const matchedElements = matches.union(edgeMatches);
         if (!matchedElements.length) {
             if (count) { count.textContent = "No match"; count.className = "graph-search-count none"; }
             return;
         }
-
-        // Dim the rest of the graph. Direct Cytoscape styles are used here
-        // rather than relying only on stylesheet classes, making the effect
-        // reliable across Cytoscape versions and graph redraws.
-        cy.elements().not(matchedElements).style("opacity", 0.10);
-        matchedElements.style("opacity", 1);
         matchedElements.addClass("search-hit");
-        cy.fit(matchedElements, 110);
-
-        if (count) {
-            count.textContent = `${matchedElements.length} match${matchedElements.length === 1 ? "" : "es"}`;
-            count.className = "graph-search-count match";
-        }
-
-        const pulseNodes = matches;
-        const pulseEdges = edgeMatches;
-        let phase = false;
-        const applyPulse = () => {
-            phase = !phase;
-            if (pulseNodes.length) {
-                pulseNodes.forEach(node => {
-                    const type = normalize(node.data("type"));
-                    if (phase) {
-                        node.style({
-                            "opacity": 1,
-                            "border-width": type === "vasp" ? 12 : 10,
-                            "border-color": "#ffffff",
-                            ...(type === "vasp" ? { "background-color": "#ffffff" } : {}),
-                            "overlay-color": "#ffffff",
-                            "overlay-opacity": 0.78
-                        });
-                    } else {
-                        node.style({
-                            "opacity": 1,
-                            "border-width": type === "vasp" ? 5 : 4,
-                            "border-color": type === "vasp" ? "#7dd3fc" : "#ffffff",
-                            ...(type === "vasp" ? { "background-color": "#eaf2ff" } : {}),
-                            "overlay-color": "#ffffff",
-                            "overlay-opacity": 0.08
-                        });
-                    }
-                });
-            }
-            if (pulseEdges.length) {
-                pulseEdges.forEach(edge => {
-                    edge.style({
-                        "opacity": phase ? 1 : 0.72,
-                        "width": phase ? 8 : 3,
-                        "line-color": "#ffffff",
-                        "target-arrow-color": "#ffffff"
-                    });
-                });
-            }
-        };
-        applyPulse();
-        graphSearchPulse = setInterval(applyPulse, 420);
+        if (count) { count.textContent = `${matchedElements.length} match${matchedElements.length === 1 ? "" : "es"}`; count.className = "graph-search-count match"; }
+        cy.elements().not(matchedElements).style("opacity", 0.12);
+        matchedElements.style("opacity", 1);
+        cy.fit(matchedElements, 100);
+        let on = true;
+        graphSearchPulse = setInterval(() => {
+            on = !on;
+            if (on) matchedElements.removeClass("search-pulse-off");
+            else matchedElements.addClass("search-pulse-off");
+        }, 420);
     }
 
     const searchInput = document.getElementById("graphSearchInput");
@@ -455,55 +385,16 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     const searchClear = document.getElementById("graphSearchClear");
     if (searchButton) searchButton.onclick = runGraphSearch;
     if (searchInput) {
-        searchInput.oninput = () => {
-            if (!searchInput.value.trim()) clearGraphSearch();
-            else runGraphSearch();
-        };
-        searchInput.onkeydown = event => {
-            if (event.key === "Enter") { event.preventDefault(); runGraphSearch(); }
-            if (event.key === "Escape") { event.preventDefault(); clearGraphSearch(); }
-        };
+        searchInput.oninput = () => { if (!searchInput.value.trim()) clearGraphSearch(); };
+        searchInput.onkeydown = event => { if (event.key === "Enter") runGraphSearch(); if (event.key === "Escape") clearGraphSearch(); };
     }
     if (searchClear) searchClear.onclick = clearGraphSearch;
 
-    function drawFlowOverlay() {
-        overlay.setAttribute("width", graphEl.clientWidth);
-        overlay.setAttribute("height", graphEl.clientHeight);
-        overlay.setAttribute("viewBox", `0 0 ${graphEl.clientWidth} ${graphEl.clientHeight}`);
-        overlay.innerHTML = "";
-        cy.edges().forEach((edge, index) => {
-            const s = edge.source().renderedPosition();
-            const t = edge.target().renderedPosition();
-            const dx = t.x - s.x, dy = t.y - s.y;
-            const len = Math.max(1, Math.hypot(dx, dy));
-            const nx = -dy / len, ny = dx / len;
-            const bend = Math.min(42, Math.max(18, len * 0.08)) * (index % 2 ? -1 : 1);
-            const cx = (s.x + t.x) / 2 + nx * bend;
-            const cyy = (s.y + t.y) / 2 + ny * bend;
-            const d = `M ${s.x} ${s.y} Q ${cx} ${cyy} ${t.x} ${t.y}`;
-            const type = edge.data("edgeType") || "wallet";
-            const color = COLORS[type] || COLORS.wallet;
-            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            path.setAttribute("d", d); path.setAttribute("fill", "none"); path.setAttribute("stroke", color); path.setAttribute("stroke-width", "2.2"); path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-dasharray", "9 12"); path.setAttribute("opacity", "0.78"); path.classList.add("flow-path");
-            overlay.appendChild(path);
-            const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-            dot.setAttribute("r", "3.5"); dot.setAttribute("fill", color); dot.setAttribute("opacity", "0.95");
-            const motion = document.createElementNS("http://www.w3.org/2000/svg", "animateMotion");
-            motion.setAttribute("dur", `${2.2 + (index % 4) * 0.35}s`); motion.setAttribute("repeatCount", "indefinite"); motion.setAttribute("rotate", "auto");
-            const mpath = document.createElementNS("http://www.w3.org/2000/svg", "mpath");
-            const pathId = `flow-path-${index}`; path.setAttribute("id", pathId); mpath.setAttributeNS("http://www.w3.org/1999/xlink", "href", `#${pathId}`); motion.appendChild(mpath); dot.appendChild(motion); overlay.appendChild(dot);
-        });
-    }
-    function scheduleOverlay() {
-        if (flowOverlayFrame) return;
-        flowOverlayFrame = requestAnimationFrame(() => { flowOverlayFrame = null; drawFlowOverlay(); });
-    }
-    cy.on("render zoom pan resize position", scheduleOverlay);
-    setTimeout(() => { cy.fit(undefined, 55); scheduleOverlay(); }, 550);
+    setTimeout(() => { cy.fit(undefined, 35); }, 120);
 }
 
 function fitGraph() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.fit(undefined, 55); } }
-function resetGraphView() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.layout({name: "breadthfirst", directed: true, padding: 55, spacingFactor: 1.55, animate: true, animationDuration: 450}).run(); setTimeout(fitGraph, 500); } }
+function resetGraphView() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.layout({name: "breadthfirst", directed: true, padding: 35, spacingFactor: 1.15, animate: false}).run(); setTimeout(fitGraph, 100); } }
 
 async function toggleGraphFullscreen() {
     const stage = document.getElementById("graphStage");
@@ -620,13 +511,13 @@ function focusTransaction(tx) {
 function downloadInvestigationJSON() {
     if (!investigationData) return;
     const blob = new Blob([JSON.stringify(investigationData, null, 2)], {type: "application/json"});
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sutranex-investigation-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sutradhar-investigation-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
 }
 
 async function copyEvidenceSummary() {
     if (!investigationData) return;
     const d = investigationData, i = d.intelligence || {};
-    const text = `SUTRANEX Investigation\nWallet: ${d.wallet}\nCandidate VASP: ${i.candidate_vasp || "INCONCLUSIVE"}\nEvidence score: ${i.confidence ?? 0}%\nTransactions: ${d.transaction_count ?? 0}\nStatus: ${d.trace_status || "COMPLETE"}\nBasis: ${i.score_explanation || "Observable blockchain evidence"}`;
+    const text = `SUTRADHAR Investigation\nWallet: ${d.wallet}\nCandidate VASP: ${i.candidate_vasp || "INCONCLUSIVE"}\nEvidence score: ${i.confidence ?? 0}%\nTransactions: ${d.transaction_count ?? 0}\nStatus: ${d.trace_status || "COMPLETE"}\nBasis: ${i.score_explanation || "Observable blockchain evidence"}`;
     try { await navigator.clipboard.writeText(text); } catch { alert(text); }
 }
 
