@@ -620,13 +620,13 @@ function focusTransaction(tx) {
 function downloadInvestigationJSON() {
     if (!investigationData) return;
     const blob = new Blob([JSON.stringify(investigationData, null, 2)], {type: "application/json"});
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sutradhar-investigation-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sutranex-investigation-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
 }
 
 async function copyEvidenceSummary() {
     if (!investigationData) return;
     const d = investigationData, i = d.intelligence || {};
-    const text = `SUTRADHAR Investigation\nWallet: ${d.wallet}\nCandidate VASP: ${i.candidate_vasp || "INCONCLUSIVE"}\nEvidence score: ${i.confidence ?? 0}%\nTransactions: ${d.transaction_count ?? 0}\nStatus: ${d.trace_status || "COMPLETE"}\nBasis: ${i.score_explanation || "Observable blockchain evidence"}`;
+    const text = `SUTRANEX Investigation\nWallet: ${d.wallet}\nCandidate VASP: ${i.candidate_vasp || "INCONCLUSIVE"}\nEvidence score: ${i.confidence ?? 0}%\nTransactions: ${d.transaction_count ?? 0}\nStatus: ${d.trace_status || "COMPLETE"}\nBasis: ${i.score_explanation || "Observable blockchain evidence"}`;
     try { await navigator.clipboard.writeText(text); } catch { alert(text); }
 }
 
