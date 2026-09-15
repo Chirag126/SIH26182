@@ -204,177 +204,301 @@ function renderQuality(data) {
 function drawGraph(transactions, startingWallet, analysisData = {}) {
     if (graphMotionFrame) { cancelAnimationFrame(graphMotionFrame); graphMotionFrame = null; }
     graphMotionLast = 0;
+    if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
     if (activeGraph) activeGraph.destroy();
+
     const graphEl = document.getElementById("graph");
     const popup = document.getElementById("graphPopup");
     const popupContent = document.getElementById("graphPopupContent");
     const popupClose = document.getElementById("graphPopupClose");
-    graphEl.innerHTML = "";
-
     const intelligence = analysisData.intelligence || {};
-    const classifications = new Map((analysisData.node_classification || []).map(x => [String(x.address).toLowerCase(), x]));
-    const depositSet = new Set((analysisData.deposit_analysis?.candidates || []).map(x => String(x.address).toLowerCase()));
-    const hotSet = new Set((analysisData.hot_wallet_analysis?.candidates || []).map(x => String(x.address).toLowerCase()));
-    const matchedSet = new Set((intelligence.matched_addresses || []).map(x => String(x).toLowerCase()));
-    const vaspName = intelligence.candidate_vasp || analysisData.vasp_candidates?.[0]?.vasp || "VASP";
-    const elements = [];
+    const classifications = new Map(
+        (analysisData.node_classification || []).map(x => [String(x.address || "").toLowerCase(), x])
+    );
+    const matchedSet = new Set(
+        (intelligence.matched_addresses || []).map(x => String(x).toLowerCase())
+    );
+    const vaspName = intelligence.candidate_vasp ||
+        analysisData.vasp_candidates?.[0]?.vasp || "VASP";
+
     const nodes = new Set();
+    const displayAddresses = new Map();
+    const elements = [];
+    const MAX_VISUAL_NODES = 90;
+    const MAX_VISUAL_EDGES = 80;
+
+    function norm(value) { return String(value || "").toLowerCase(); }
 
     function inferType(address) {
-        const key = String(address).toLowerCase();
-        if (key === String(startingWallet).toLowerCase()) return "start";
-        if (classifications.has(key)) return classifications.get(key).type || "wallet";
+        const key = norm(address);
+        const classified = classifications.get(key);
+        if (classified?.type) return classified.type;
         if (matchedSet.has(key)) return "vasp";
-        if (depositSet.has(key) || key.startsWith("0xdep")) return "deposit";
-        if (hotSet.has(key) || key.startsWith("0xhot")) return "hot";
-        if (key === "mixer") return "mixer";
-        if (key === "bridge") return "bridge";
+        if (key === norm(startingWallet)) return "start";
+        if (key.includes("mixer") || key.includes("tornado")) return "mixer";
+        if (key.includes("bridge")) return "bridge";
+        if (key.startsWith("0xdep")) return "deposit";
+        if (key.startsWith("0xhot")) return "hot";
         if (key.startsWith("0xdest")) return "destination";
         return "wallet";
     }
 
-    function addNode(address) {
-        if (!address || nodes.has(address)) return;
-        nodes.add(address);
-        const type = inferType(address);
-        const cls = classifications.get(String(address).toLowerCase());
-        const isVasp = matchedSet.has(String(address).toLowerCase());
-        elements.push({ data: { id: address, address, type, reason: cls?.reason || nodeReason(type), vaspMatch: isVasp, vaspName: isVasp ? vaspName : "" } });
+    function nodePriority(type) {
+        return ({
+            vasp: 100,
+            start: 95,
+            deposit: 90,
+            hot: 88,
+            mixer: 86,
+            bridge: 86,
+            destination: 82,
+            wallet: 20
+        })[type] || 10;
     }
 
-    // Keep the visual graph bounded: the underlying transaction table/data remains complete.
-    // This prevents dense real-wallet investigations from turning into a giant force graph.
-    const MAX_VISUAL_EDGES = 90;
-    const MAX_VISUAL_NODES = 90;
-    const visibleTransactions = [];
-    transactions.forEach((tx, index) => {
-        if (visibleTransactions.length >= MAX_VISUAL_EDGES || !tx.from || !tx.to) return;
-        const a = String(tx.from), b = String(tx.to);
-        const newCount = (nodes.has(a) ? 0 : 1) + (nodes.has(b) ? 0 : 1);
-        if (nodes.size + newCount > MAX_VISUAL_NODES) return;
-        addNode(a); addNode(b);
-        visibleTransactions.push([tx, index]);
+    function addNode(address) {
+        if (!address) return false;
+        const key = norm(address);
+        if (nodes.has(key)) return true;
+        if (nodes.size >= MAX_VISUAL_NODES) return false;
+        const type = inferType(key);
+        const cls = classifications.get(key);
+        const isVasp = matchedSet.has(key) || type === "vasp";
+        nodes.add(key);
+        displayAddresses.set(key, String(address));
+        elements.push({
+            data: {
+                id: key,
+                address: String(address),
+                type,
+                label: nodeTypeLabel(type),
+                reason: cls?.reason || nodeReason(type),
+                vaspMatch: isVasp,
+                vaspName: isVasp ? vaspName : ""
+            }
+        });
+        return true;
+    }
+
+    // IMPORTANT: reserve VASP infrastructure before admitting ordinary wallets.
+    // The previous version filled the 90-node visual budget with wallets first,
+    // so the white VASP node could disappear from the graph.
+    const priorityAddresses = [];
+    priorityAddresses.push(String(startingWallet));
+    matchedSet.forEach(a => priorityAddresses.push(a));
+    (analysisData.node_classification || [])
+        .slice()
+        .sort((a, b) => nodePriority(b.type) - nodePriority(a.type))
+        .forEach(x => priorityAddresses.push(x.address));
+
+    Array.from(new Set(priorityAddresses.filter(Boolean))).forEach(addNode);
+
+    // Prefer transaction edges that connect the investigation target or an important
+    // infrastructure node. This keeps the visible graph informative without drawing
+    // hundreds of lines.
+    const txRows = (transactions || [])
+        .map((tx, index) => ({ tx, index }))
+        .filter(({tx}) => tx?.from && tx?.to);
+
+    txRows.sort((a, b) => {
+        const score = ({tx}) => {
+            const s = nodePriority(inferType(tx.from)) + nodePriority(inferType(tx.to));
+            return s + (norm(tx.from) === norm(startingWallet) ? 80 : 0)
+                     + (matchedSet.has(norm(tx.to)) || matchedSet.has(norm(tx.from)) ? 70 : 0);
+        };
+        return score(b) - score(a) || a.index - b.index;
     });
 
-    // Add the selected transactions after node admission so the visual graph stays bounded.
-    visibleTransactions.forEach(([tx, index]) => {
-        const edgeType = inferType(tx.to);
-        elements.push({ data: {
-            id: tx.tx_hash || `edge-${index}`,
-            source: tx.from,
-            target: tx.to,
-            amount: tx.amount ?? "Unknown",
-            chain: tx.chain || "Unknown",
-            tx_hash: tx.tx_hash || "Unknown",
-            from: tx.from,
-            to: tx.to,
-            edgeType,
-            token: tx.token || "",
-            timestamp: tx.timestamp || ""
-        }});
+    let visibleEdgeCount = 0;
+    txRows.forEach(({tx, index}) => {
+        if (visibleEdgeCount >= MAX_VISUAL_EDGES) return;
+        const a = norm(tx.from), b = norm(tx.to);
+        const missing = (nodes.has(a) ? 0 : 1) + (nodes.has(b) ? 0 : 1);
+        if (nodes.size + missing > MAX_VISUAL_NODES) return;
+        addNode(tx.from);
+        addNode(tx.to);
+
+        elements.push({
+            data: {
+                id: tx.tx_hash || `edge-${index}`,
+                source: a,
+                target: b,
+                amount: tx.amount ?? "Unknown",
+                chain: tx.chain || "Unknown",
+                tx_hash: tx.tx_hash || "Unknown",
+                from: a,
+                to: b,
+                edgeType: inferType(b),
+                token: tx.token || "",
+                timestamp: tx.timestamp || ""
+            }
+        });
+        visibleEdgeCount += 1;
     });
 
-    // Keep matched VASP infrastructure visible, but do not create synthetic edges.
-    matchedSet.forEach(address => {
-        if (nodes.size < MAX_VISUAL_NODES) addNode(address);
+    // Deterministic, investigation-oriented layout:
+    // VASP stays in the middle, important infrastructure sits around it,
+    // and ordinary wallets occupy clean upper/lower rows.
+    const positions = new Map();
+    const mainTypes = new Set(["start", "vasp", "deposit", "hot", "mixer", "bridge", "destination"]);
+    const mainNodes = Array.from(nodes).filter(a => mainTypes.has(inferType(a)));
+    const walletNodes = Array.from(nodes).filter(a => inferType(a) === "wallet");
+
+    const CENTER_X = 620;
+    const CENTER_Y = 285;
+    const MAIN_X = {
+        start: 115,
+        mixer: 330,
+        bridge: 470,
+        vasp: CENTER_X,
+        deposit: 780,
+        hot: 920,
+        destination: 1060
+    };
+
+    const grouped = new Map();
+    mainNodes.forEach(address => {
+        const type = inferType(address);
+        if (!grouped.has(type)) grouped.set(type, []);
+        grouped.get(type).push(address);
     });
 
-    // Compact layered starting positions make the force simulation settle around the fund flow,
-    // instead of producing the scattered rows caused by a randomized force start.
-    const depth = new Map([[String(startingWallet).toLowerCase(), 0]]);
-    const queue = [String(startingWallet).toLowerCase()];
-    const adjacency = new Map();
-    elements.filter(e => e.data.source && e.data.target).forEach(e => {
-        const a = String(e.data.source).toLowerCase(), b = String(e.data.target).toLowerCase();
-        if (!adjacency.has(a)) adjacency.set(a, []); if (!adjacency.has(b)) adjacency.set(b, []);
-        adjacency.get(a).push(b); adjacency.get(b).push(a);
+    grouped.forEach((items, type) => {
+        items.sort((a,b) => String(a).localeCompare(String(b)));
+        const x = MAIN_X[type] ?? CENTER_X;
+        const gap = type === "vasp" ? 82 : 72;
+        const startY = CENTER_Y - ((items.length - 1) * gap) / 2;
+        items.forEach((address, i) => {
+            positions.set(address, { x, y: startY + i * gap });
+        });
     });
-    while (queue.length) {
-        const a = queue.shift();
-        (adjacency.get(a) || []).forEach(b => {
-            if (!depth.has(b)) { depth.set(b, depth.get(a) + 1); queue.push(b); }
+
+    // Wallets are deliberately kept on two clean rails. Their x positions are
+    // evenly distributed so a real-wallet graph remains readable.
+    walletNodes.sort((a,b) => {
+        const da = classifications.get(norm(a)), db = classifications.get(norm(b));
+        return String(da?.address || a).localeCompare(String(db?.address || b));
+    });
+    const top = [], bottom = [];
+    walletNodes.forEach((address, i) => (i % 2 === 0 ? top : bottom).push(address));
+
+    function placeRail(items, y) {
+        if (!items.length) return;
+        const left = 95, right = 1080;
+        const step = items.length === 1 ? 0 : (right - left) / (items.length - 1);
+        items.forEach((address, i) => {
+            positions.set(address, {
+                x: items.length === 1 ? CENTER_X : left + i * step,
+                y
+            });
         });
     }
-    let maxDepth = Math.max(0, ...Array.from(depth.values()));
-    const unplaced = Array.from(nodes).filter(a => !depth.has(String(a).toLowerCase()));
-    unplaced.forEach((a, i) => depth.set(String(a).toLowerCase(), maxDepth + 1 + Math.floor(i / 12)));
-    maxDepth = Math.max(...Array.from(depth.values()));
-    const layers = new Map();
-    nodes.forEach(a => { const d = depth.get(String(a).toLowerCase()) ?? maxDepth; if (!layers.has(d)) layers.set(d, []); layers.get(d).push(a); });
-    const layerGap = Math.max(115, Math.min(175, 900 / Math.max(1, maxDepth + 1)));
-    const rowGap = 78;
-    const centerY = 300;
-    const positions = new Map();
-    layers.forEach((items, d) => {
-        items.sort((a, b) => String(a).localeCompare(String(b)));
-        const span = (items.length - 1) * rowGap;
-        items.forEach((a, i) => positions.set(a, { x: 90 + d * layerGap, y: centerY - span / 2 + i * rowGap }));
+    placeRail(top, 95);
+    placeRail(bottom, 475);
+
+    // Fallback for any node not classified above.
+    let fallbackIndex = 0;
+    nodes.forEach(address => {
+        if (!positions.has(address)) {
+            positions.set(address, {
+                x: 120 + (fallbackIndex % 8) * 135,
+                y: 180 + Math.floor(fallbackIndex / 8) * 70
+            });
+            fallbackIndex++;
+        }
     });
-    elements.forEach(e => { if (e.data.address) e.position = positions.get(e.data.address) || { x: 100, y: 100 }; });
+
+    elements.forEach(element => {
+        if (element.data.address) {
+            element.position = positions.get(norm(element.data.address));
+        }
+    });
 
     const cy = cytoscape({
         container: graphEl,
         elements,
         style: [
-            { selector: "node", style: { "background-color": COLORS.wallet, "label": "data(label)", "color": "#eaf2ff", "text-valign": "center", "text-halign": "center", "font-size": 8, "font-weight": 700, "text-wrap": "wrap", "text-max-width": 78, "width": 48, "height": 48, "border-width": 2, "border-color": "#4c6485", "opacity": 0.82, "overlay-opacity": 0 } },
+            {
+                selector: "node",
+                style: {
+                    "background-color": COLORS.wallet,
+                    "label": "data(label)",
+                    "color": "#eaf2ff",
+                    "text-valign": "center",
+                    "text-halign": "center",
+                    "font-size": 8,
+                    "font-weight": 700,
+                    "text-wrap": "wrap",
+                    "text-max-width": 78,
+                    "width": 44,
+                    "height": 44,
+                    "border-width": 2,
+                    "border-color": "#41617d",
+                    "opacity": 0.9,
+                    "overlay-opacity": 0
+                }
+            },
             { selector: 'node[type="start"]', style: { "background-color": COLORS.start, "border-color": "#ffb1c0", "border-width": 4, "width": 58, "height": 58, "opacity": 1 } },
-            { selector: 'node[type="deposit"]', style: { "background-color": COLORS.deposit, "border-color": "#ffe08a", "border-width": 4, "opacity": 1 } },
-            { selector: 'node[type="hot"]', style: { "background-color": COLORS.hot, "border-color": "#8bf0bd", "border-width": 4, "opacity": 1 } },
-            { selector: 'node[type="vasp"]', style: { "background-color": "#eaf2ff", "color": "#08111f", "border-color": "#ffffff", "border-width": 5, "opacity": 1 } },
-            { selector: 'node[type="mixer"]', style: { "background-color": COLORS.mixer, "border-color": "#ffb16f", "border-width": 4, "opacity": 1 } },
-            { selector: 'node[type="bridge"]', style: { "background-color": COLORS.bridge, "border-color": "#d2b7ff", "border-width": 4, "opacity": 1 } },
+            { selector: 'node[type="deposit"]', style: { "background-color": COLORS.deposit, "border-color": "#ffe08a", "border-width": 3, "opacity": 1 } },
+            { selector: 'node[type="hot"]', style: { "background-color": COLORS.hot, "border-color": "#8bf0bd", "border-width": 3, "opacity": 1 } },
+            { selector: 'node[type="vasp"]', style: { "background-color": "#f5f8ff", "color": "#08111f", "border-color": "#ffffff", "border-width": 5, "width": 58, "height": 58, "opacity": 1 } },
+            { selector: 'node[type="mixer"]', style: { "background-color": COLORS.mixer, "border-color": "#ffb16f", "border-width": 3, "opacity": 1 } },
+            { selector: 'node[type="bridge"]', style: { "background-color": COLORS.bridge, "border-color": "#d2b7ff", "border-width": 3, "opacity": 1 } },
             { selector: 'node[type="destination"]', style: { "background-color": COLORS.destination, "border-color": "#a9dcff", "border-width": 3, "opacity": 1 } },
-            { selector: "node.search-hit", style: { "border-width": 8, "border-color": "#ffffff", "overlay-color": "#ffffff", "overlay-opacity": 0.22, "opacity": 1 } },
-            { selector: "node.search-hit.search-pulse-off", style: { "border-width": 3, "overlay-opacity": 0, "opacity": 1 } },
-            { selector: "edge.search-hit", style: { "width": 6, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } },
-            { selector: "edge.search-hit.search-pulse-off", style: { "width": 3, "opacity": 0.7 } },
+
+            // Search highlighting uses direct style changes below instead of
+            // CSS animation, which is much cheaper on dense graphs.
+            { selector: "node.search-hit", style: { "border-width": 7, "border-color": "#ffffff", "overlay-color": "#ffffff", "overlay-opacity": 0.18, "opacity": 1 } },
+            { selector: "edge.search-hit", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } },
             { selector: "node:selected", style: { "border-width": 6, "border-color": "#ffffff", "opacity": 1 } },
-            { selector: "edge", style: { "width": 2, "line-color": "#49617f", "target-arrow-color": "#49617f", "target-arrow-shape": "triangle", "curve-style": "straight", "opacity": 0.28 } },
+            {
+                selector: "edge",
+                style: {
+                    "width": 1.5,
+                    "line-color": "#3c5875",
+                    "target-arrow-color": "#3c5875",
+                    "target-arrow-shape": "triangle",
+                    "curve-style": "straight",
+                    "opacity": 0.34
+                }
+            },
             { selector: 'edge[edgeType="deposit"]', style: { "line-color": COLORS.deposit, "target-arrow-color": COLORS.deposit, "opacity": 0.55 } },
-            { selector: 'edge[edgeType="hot"]', style: { "line-color": COLORS.hot, "target-arrow-color": COLORS.hot, "opacity": 0.65 } },
-            { selector: 'edge[edgeType="vasp"]', style: { "line-color": COLORS.vasp, "target-arrow-color": COLORS.vasp, "opacity": 0.8 } },
-            { selector: 'edge[edgeType="mixer"]', style: { "line-color": COLORS.mixer, "target-arrow-color": COLORS.mixer, "opacity": 0.8 } },
-            { selector: 'edge[edgeType="bridge"]', style: { "line-color": COLORS.bridge, "target-arrow-color": COLORS.bridge, "opacity": 0.8 } },
-            { selector: "edge:selected", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } }
+            { selector: 'edge[edgeType="hot"]', style: { "line-color": COLORS.hot, "target-arrow-color": COLORS.hot, "opacity": 0.62 } },
+            { selector: 'edge[edgeType="vasp"]', style: { "line-color": COLORS.vasp, "target-arrow-color": COLORS.vasp, "opacity": 0.72 } },
+            { selector: 'edge[edgeType="mixer"]', style: { "line-color": COLORS.mixer, "target-arrow-color": COLORS.mixer, "opacity": 0.68 } },
+            { selector: 'edge[edgeType="bridge"]', style: { "line-color": COLORS.bridge, "target-arrow-color": COLORS.bridge, "opacity": 0.68 } },
+            { selector: "edge:selected", style: { "width": 4, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } }
         ],
         layout: {
-            name: "cose",
-            directed: true,
-            padding: 35,
-            animate: true,
-            animationDuration: 450,
-            randomize: false,
+            name: "preset",
             fit: true,
-            nodeRepulsion: 2600,
-            idealEdgeLength: 92,
-            edgeElasticity: 0.34,
-            nestingFactor: 0.7,
-            gravity: 0.75,
-            numIter: 70,
-            initialEnergyOnIncremental: 0.25
-        }
+            padding: 50
+        },
+        minZoom: 0.45,
+        maxZoom: 2.5,
+        pixelRatio: 1
     });
 
-    cy.nodes().forEach(node => node.data("label", nodeTypeLabel(node.data("type"))));
+    activeGraph = cy;
+    document.getElementById("graphEmpty").classList.toggle("hidden", transactions.length > 0);
 
-    // Lightweight animated flow: one canvas, a small capped number of particles,
-    // and throttled rendering. This keeps the graph visually alive without
-    // creating an SVG animation for every transaction edge.
+    // One tiny canvas animation layer. It follows the real Cytoscape edge
+    // positions, so dragging a node immediately changes the particle path.
     const motionCanvas = document.createElement("canvas");
     motionCanvas.className = "graph-motion-canvas";
     motionCanvas.setAttribute("aria-hidden", "true");
     graphEl.appendChild(motionCanvas);
-    const motionCtx = motionCanvas.getContext("2d");
-    const motionEdges = cy.edges().slice(0, 10);
+    const motionCtx = motionCanvas.getContext("2d", { alpha: true });
+    const motionEdges = cy.edges().slice(0, Math.min(8, cy.edges().length));
     const particles = motionEdges.map((edge, index) => ({
         edge,
-        offset: (index / Math.max(1, motionEdges.length)) * 0.9,
-        speed: 0.000055 + (index % 4) * 0.000012
+        offset: index / Math.max(1, motionEdges.length),
+        speed: 0.000035 + (index % 3) * 0.000009
     }));
 
     function resizeMotionCanvas() {
         const rect = graphEl.getBoundingClientRect();
-        const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+        const dpr = Math.min(window.devicePixelRatio || 1, 1.15);
         motionCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
         motionCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
         motionCanvas.style.width = `${rect.width}px`;
@@ -384,44 +508,48 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
 
     function drawMotion(now = performance.now()) {
         if (!motionCtx) return;
+        if (document.hidden) {
+            graphMotionFrame = null;
+            return;
+        }
         const rect = graphEl.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
+
+        // ~18 FPS is intentional: enough motion to feel alive without
+        // continuously consuming a laptop CPU/GPU core.
         if (now - graphMotionLast < 55) {
             graphMotionFrame = requestAnimationFrame(drawMotion);
             return;
         }
         graphMotionLast = now;
         motionCtx.clearRect(0, 0, rect.width, rect.height);
-        if (document.hidden) {
-            graphMotionFrame = null;
-            return;
-        }
 
         particles.forEach(p => {
+            if (!p.edge || p.edge.removed()) return;
             const source = p.edge.source().renderedPosition();
             const target = p.edge.target().renderedPosition();
             if (!source || !target) return;
-            const t = ((now * p.speed + p.offset) % 1);
+
+            const t = (now * p.speed + p.offset) % 1;
             const x = source.x + (target.x - source.x) * t;
             const y = source.y + (target.y - source.y) * t;
-
             const dx = target.x - source.x, dy = target.y - source.y;
             const len = Math.hypot(dx, dy) || 1;
-            const trail = 11;
+
+            // Small glow only; no shadow on the whole edge.
             motionCtx.beginPath();
-            motionCtx.moveTo(x - (dx / len) * trail, y - (dy / len) * trail);
-            motionCtx.lineTo(x, y);
-            motionCtx.lineWidth = 2;
-            motionCtx.strokeStyle = "rgba(180,235,255,0.42)";
-            motionCtx.shadowBlur = 5;
-            motionCtx.shadowColor = "rgba(110,220,255,0.65)";
-            motionCtx.stroke();
-            motionCtx.beginPath();
-            motionCtx.arc(x, y, 1.8, 0, Math.PI * 2);
-            motionCtx.fillStyle = "rgba(235,250,255,0.95)";
+            motionCtx.arc(x, y, 2, 0, Math.PI * 2);
+            motionCtx.fillStyle = "rgba(225,248,255,0.95)";
             motionCtx.fill();
-            motionCtx.shadowBlur = 0;
+
+            motionCtx.beginPath();
+            motionCtx.moveTo(x - (dx / len) * 9, y - (dy / len) * 9);
+            motionCtx.lineTo(x, y);
+            motionCtx.lineWidth = 1.4;
+            motionCtx.strokeStyle = "rgba(125,215,255,0.48)";
+            motionCtx.stroke();
         });
+
         graphMotionFrame = requestAnimationFrame(drawMotion);
     }
 
@@ -431,15 +559,16 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         if (!graphMotionFrame) graphMotionFrame = requestAnimationFrame(drawMotion);
     });
     graphMotionFrame = requestAnimationFrame(drawMotion);
-    activeGraph = cy;
-    document.getElementById("graphEmpty").classList.toggle("hidden", transactions.length > 0);
 
     function showPopup(title, rows, element) {
         popupContent.innerHTML = "";
-        const kicker = document.createElement("div"); kicker.className = "popup-kicker"; kicker.textContent = title;
+        const kicker = document.createElement("div");
+        kicker.className = "popup-kicker";
+        kicker.textContent = title;
         popupContent.appendChild(kicker);
         rows.forEach(row => {
-            const div = document.createElement("div"); div.className = "popup-row";
+            const div = document.createElement("div");
+            div.className = "popup-row";
             div.innerHTML = `<strong>${escapeHtml(row.label)}</strong><span>${escapeHtml(String(row.value ?? "Unknown"))}</span>`;
             popupContent.appendChild(div);
         });
@@ -447,47 +576,56 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         element.select();
         popup.classList.remove("hidden");
     }
-    function closePopup() { popup.classList.add("hidden"); cy.elements().unselect(); }
+
+    function closePopup() {
+        popup.classList.add("hidden");
+        cy.elements().unselect();
+    }
 
     cy.on("tap", "node", event => {
-        const n = event.target; const d = n.data();
+        const n = event.target, d = n.data();
         showPopup("WALLET / ENTITY", [
-            ["Type", nodeTypeLabel(d.type)], ["Address", d.address], ["Incoming", n.incomers("edge").length], ["Outgoing", n.outgoers("edge").length], ["Why classified", d.reason || "Observed address"]
-        ].map(([label, value]) => ({label, value})), n);
+            ["Type", nodeTypeLabel(d.type)],
+            ["Address", d.address],
+            ["VASP", d.vaspMatch ? d.vaspName : "—"],
+            ["Incoming", n.incomers("edge").length],
+            ["Outgoing", n.outgoers("edge").length],
+            ["Why classified", d.reason || "Observed address"]
+        ], n);
     });
+
     cy.on("tap", "edge", event => {
-        const e = event.target; const d = e.data();
+        const e = event.target, d = e.data();
         showPopup("TRANSACTION EVIDENCE", [
-            ["TX Hash", d.tx_hash], ["From", d.from], ["To", d.to], ["Amount", d.amount], ["Chain", d.chain], ["Token", d.token || "Native"], ["Block / Time", d.timestamp || "Not supplied"]
-        ].map(([label, value]) => ({label, value})), e);
+            ["TX Hash", d.tx_hash],
+            ["From", d.from],
+            ["To", d.to],
+            ["Amount", d.amount],
+            ["Chain", d.chain],
+            ["Token", d.token || "Native"],
+            ["Block / Time", d.timestamp || "Not supplied"]
+        ], e);
     });
+
     cy.on("tap", event => { if (event.target === cy) closePopup(); });
     popupClose.onclick = closePopup;
 
-    // A short physics pass after dragging makes the surrounding network react naturally,
-    // without keeping a full force simulation running continuously.
-    let dragTimer = null;
-    cy.on("free", "node", event => {
-        clearTimeout(dragTimer);
-        dragTimer = setTimeout(() => {
-            if (!activeGraph || activeGraph.destroyed()) return;
-            activeGraph.layout({ name: "cose", directed: true, padding: 35, animate: true,
-                animationDuration: 280, randomize: false, fit: false, nodeRepulsion: 2200,
-                idealEdgeLength: 88, edgeElasticity: 0.38, gravity: 0.7, numIter: 32,
-                initialEnergyOnIncremental: 0.18 }).run();
-        }, 70);
-    });
-
     function clearGraphSearch() {
-        if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
-        cy.elements().removeClass("search-hit search-pulse-off");
-        cy.elements().removeStyle("opacity");
+        if (graphSearchPulse) {
+            clearInterval(graphSearchPulse);
+            graphSearchPulse = null;
+        }
+        cy.elements().removeClass("search-hit");
+        cy.elements().removeStyle();
         const input = document.getElementById("graphSearchInput");
         const clear = document.getElementById("graphSearchClear");
         const count = document.getElementById("graphSearchCount");
         if (input) input.value = "";
         if (clear) clear.classList.add("hidden");
-        if (count) { count.textContent = ""; count.className = "graph-search-count"; }
+        if (count) {
+            count.textContent = "";
+            count.className = "graph-search-count";
+        }
     }
 
     function runGraphSearch() {
@@ -495,46 +633,103 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         const clear = document.getElementById("graphSearchClear");
         const count = document.getElementById("graphSearchCount");
         const term = (input?.value || "").trim().toLowerCase();
-        if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
-        cy.elements().removeClass("search-hit search-pulse-off");
-        cy.elements().removeStyle("opacity");
-        if (!term) { if (clear) clear.classList.add("hidden"); if (count) { count.textContent = ""; count.className = "graph-search-count"; } return; }
+
+        if (graphSearchPulse) {
+            clearInterval(graphSearchPulse);
+            graphSearchPulse = null;
+        }
+        cy.elements().removeClass("search-hit");
+        cy.elements().removeStyle();
+
+        if (!term) {
+            if (clear) clear.classList.add("hidden");
+            if (count) {
+                count.textContent = "";
+                count.className = "graph-search-count";
+            }
+            return;
+        }
         if (clear) clear.classList.remove("hidden");
 
         const aliases = {
-            vasp: ["vasp"], exchange: ["vasp"],
-            hot: ["hot"], "hot wallet": ["hot"], hotwallet: ["hot"],
+            vasp: ["vasp"],
+            exchange: ["vasp"],
+            hot: ["hot"],
+            "hot wallet": ["hot"],
+            hotwallet: ["hot"],
             deposit: ["deposit"],
-            wallet: ["wallet", "start", "destination"], investigated: ["start"], start: ["start"],
-            mixer: ["mixer"], bridge: ["bridge"], destination: ["destination"]
+            wallet: ["wallet"],
+            investigated: ["start"],
+            start: ["start"],
+            mixer: ["mixer"],
+            bridge: ["bridge"],
+            destination: ["destination"]
         };
         const types = aliases[term] || [];
+
         const matches = cy.nodes().filter(n => {
             const d = n.data();
-            const text = [d.type, nodeTypeLabel(d.type), d.address, d.reason, d.vaspName].join(" ").toLowerCase();
+            const text = [
+                d.type, nodeTypeLabel(d.type), d.address, d.reason, d.vaspName
+            ].join(" ").toLowerCase();
             return types.length ? types.includes(String(d.type).toLowerCase()) : text.includes(term);
         });
+
         const edgeMatches = cy.edges().filter(e => {
             const d = e.data();
-            const text = [d.tx_hash, d.from, d.to, d.amount, d.chain, d.token, d.edgeType, nodeTypeLabel(d.edgeType)].join(" ").toLowerCase();
-            return text.includes(term);
+            return [
+                d.tx_hash, d.from, d.to, d.amount, d.chain, d.token,
+                d.edgeType, nodeTypeLabel(d.edgeType)
+            ].join(" ").toLowerCase().includes(term);
         });
+
         const matchedElements = matches.union(edgeMatches);
+
         if (!matchedElements.length) {
-            if (count) { count.textContent = "No match"; count.className = "graph-search-count none"; }
+            if (count) {
+                count.textContent = "No match";
+                count.className = "graph-search-count none";
+            }
             return;
         }
+
         matchedElements.addClass("search-hit");
-        if (count) { count.textContent = `${matchedElements.length} match${matchedElements.length === 1 ? "" : "es"}`; count.className = "graph-search-count match"; }
         cy.elements().not(matchedElements).style("opacity", 0.12);
         matchedElements.style("opacity", 1);
-        cy.fit(matchedElements, 100);
+        if (count) {
+            count.textContent = `${matchedElements.length} match${matchedElements.length === 1 ? "" : "es"}`;
+            count.className = "graph-search-count match";
+        }
+
+        // Cheap deterministic blinking: only the already matched elements change.
         let on = true;
         graphSearchPulse = setInterval(() => {
             on = !on;
-            if (on) matchedElements.removeClass("search-pulse-off");
-            else matchedElements.addClass("search-pulse-off");
-        }, 420);
+            if (on) {
+                matches.style({
+                    "border-width": 7,
+                    "border-color": "#ffffff",
+                    "overlay-opacity": 0.18
+                });
+                edgeMatches.style({
+                    "width": 5,
+                    "line-color": "#ffffff",
+                    "target-arrow-color": "#ffffff"
+                });
+            } else {
+                matches.style({
+                    "border-width": 3,
+                    "border-color": "#9fdfff",
+                    "overlay-opacity": 0.02
+                });
+                edgeMatches.style({
+                    "width": 2,
+                    "opacity": 0.72
+                });
+            }
+        }, 500);
+
+        cy.animate({ fit: { eles: matchedElements, padding: 90 }, duration: 280 });
     }
 
     const searchInput = document.getElementById("graphSearchInput");
@@ -542,22 +737,39 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     const searchClear = document.getElementById("graphSearchClear");
     if (searchButton) searchButton.onclick = runGraphSearch;
     if (searchInput) {
-        searchInput.oninput = () => { if (!searchInput.value.trim()) clearGraphSearch(); };
-        searchInput.onkeydown = event => { if (event.key === "Enter") runGraphSearch(); if (event.key === "Escape") clearGraphSearch(); };
+        searchInput.oninput = () => {
+            if (!searchInput.value.trim()) clearGraphSearch();
+        };
+        searchInput.onkeydown = event => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                runGraphSearch();
+            } else if (event.key === "Escape") {
+                clearGraphSearch();
+            }
+        };
     }
     if (searchClear) searchClear.onclick = clearGraphSearch;
 
-    setTimeout(() => { cy.fit(undefined, 35); }, 120);
+    // No continuous physics simulation here. The graph is deterministic and
+    // readable; Cytoscape still updates every edge geometrically when a node
+    // is dragged, so lines naturally stretch and follow the node.
+    cy.on("dragfree", "node", event => {
+        const node = event.target;
+        node.connectedEdges().style("opacity", 0.72);
+        setTimeout(() => {
+            if (!node.removed()) node.connectedEdges().removeStyle("opacity");
+        }, 180);
+    });
+
+    setTimeout(() => {
+        cy.resize();
+        cy.fit(undefined, 50);
+    }, 80);
 }
 
 function fitGraph() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.fit(undefined, 55); } }
-function resetGraphView() {
-    if (!activeGraph || activeGraph.destroyed()) return;
-    activeGraph.layout({ name: "cose", directed: true, padding: 35, animate: true, animationDuration: 400,
-        randomize: false, nodeRepulsion: 2600, idealEdgeLength: 92, edgeElasticity: 0.34,
-        gravity: 0.75, numIter: 55, initialEnergyOnIncremental: 0.2 }).run();
-    setTimeout(fitGraph, 120);
-}
+function resetGraphView() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.fit(undefined, 50); } }
 
 async function toggleGraphFullscreen() {
     const stage = document.getElementById("graphStage");
