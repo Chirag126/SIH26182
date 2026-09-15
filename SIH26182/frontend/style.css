@@ -83,8 +83,8 @@ input:focus, select:focus { border-color: #3d8bc0; box-shadow: 0 0 0 3px rgba(56
 .graph-search-count.none { color: #ffb0b0; }
 #graphStage.graph-searching #graph { filter: none; }
 @media(max-width: 800px) { .graph-search { width: 100%; margin-left: 0; } .graph-search input { flex: 1; width: auto; } }
-#graphStage { position: relative; height: 560px; overflow: hidden; border: 1px solid #1b2b42; border-radius: 14px; background: #060b14; contain: layout paint; }
-#graph { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; contain: strict; will-change: contents; }
+#graphStage { position: relative; height: 560px; overflow: hidden; border: 1px solid #1b2b42; border-radius: 14px; background: #060b14; }
+#graph { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; contain: strict; }
 .graph-motion-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; mix-blend-mode: screen; contain: strict; }
 #graphFlowOverlay { display: none !important; }
 .graph-popup { position: absolute; right: 15px; top: 15px; z-index: 10; width: min(340px, calc(100% - 30px)); max-height: calc(100% - 30px); overflow: auto; background: rgba(8,14,25,.96); border: 1px solid #38506e; border-radius: 13px; padding: 15px; box-shadow: 0 18px 55px rgba(0,0,0,.5); backdrop-filter: blur(12px); }
@@ -130,6 +130,3 @@ input:focus, select:focus { border-color: #3d8bc0; box-shadow: 0 0 0 3px rgba(56
 @media(max-width: 500px) { .stats, .report-grid { grid-template-columns: 1fr; }.brand p { display: none; }.system-status { font-size: 0; }.system-status .status-dot { font-size: initial; }.graph-toolbar { align-items: flex-start; }.graph-legend { gap: 7px; } #graphStage { height: 500px; } }
 
 @media print { body { background: white; color: #111; }.topbar, .hero-card, .search-card, #results > .stats, .graph-card, .analysis-grid, .dashboard-grid, .report-header .button-row { display: none !important; }.report { display: block !important; box-shadow: none; border: 0; background: white; color: #111; }.report-evidence, .report-grid div, .evidence-chain, .transaction-table { background: white; border-color: #ddd; }.report p, .report-evidence, .timeline-time, .evidence-content small { color: #444; } }
-
-/* Graph performance: keep the Cytoscape scene free of expensive CSS transitions. */
-#graph, #graph canvas { transition: none !important; animation: none !important; }

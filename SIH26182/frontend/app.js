@@ -211,291 +211,225 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
     const popup = document.getElementById("graphPopup");
     const popupContent = document.getElementById("graphPopupContent");
     const popupClose = document.getElementById("graphPopupClose");
+    graphEl.innerHTML = "";
+
     const intelligence = analysisData.intelligence || {};
-    const classifications = new Map(
-        (analysisData.node_classification || []).map(x => [String(x.address || "").toLowerCase(), x])
-    );
-    const matchedSet = new Set(
-        (intelligence.matched_addresses || []).map(x => String(x).toLowerCase())
-    );
-    const vaspName = intelligence.candidate_vasp ||
-        analysisData.vasp_candidates?.[0]?.vasp || "VASP";
-
-    const nodes = new Set();
-    const displayAddresses = new Map();
+    const classifications = new Map((analysisData.node_classification || []).map(x => [String(x.address).toLowerCase(), x]));
+    const depositSet = new Set((analysisData.deposit_analysis?.candidates || []).map(x => String(x.address).toLowerCase()));
+    const hotSet = new Set((analysisData.hot_wallet_analysis?.candidates || []).map(x => String(x.address).toLowerCase()));
+    const matchedSet = new Set((intelligence.matched_addresses || []).map(x => String(x).toLowerCase()));
+    const vaspName = intelligence.candidate_vasp || analysisData.vasp_candidates?.[0]?.vasp || "VASP";
+    const startKey = String(startingWallet).toLowerCase();
+    const MAX_VISUAL_NODES = 72;
+    const MAX_VISUAL_EDGES = 76;
     const elements = [];
-    const MAX_VISUAL_NODES = 90;
-    const MAX_VISUAL_EDGES = 80;
+    const nodes = new Set();
+    const txRecords = [];
 
-    function norm(value) { return String(value || "").toLowerCase(); }
-
+    function keyOf(address) { return String(address || "").toLowerCase(); }
     function inferType(address) {
-        const key = norm(address);
-        const classified = classifications.get(key);
-        if (classified?.type) return classified.type;
+        const key = keyOf(address);
+        if (key === startKey) return "start";
         if (matchedSet.has(key)) return "vasp";
-        if (key === norm(startingWallet)) return "start";
-        if (key.includes("mixer") || key.includes("tornado")) return "mixer";
-        if (key.includes("bridge")) return "bridge";
-        if (key.startsWith("0xdep")) return "deposit";
-        if (key.startsWith("0xhot")) return "hot";
+        if (classifications.has(key)) return classifications.get(key).type || "wallet";
+        if (depositSet.has(key) || key.startsWith("0xdep")) return "deposit";
+        if (hotSet.has(key) || key.startsWith("0xhot")) return "hot";
+        if (key === "mixer") return "mixer";
+        if (key === "bridge") return "bridge";
         if (key.startsWith("0xdest")) return "destination";
         return "wallet";
     }
-
-    function nodePriority(type) {
-        return ({
-            vasp: 100,
-            start: 95,
-            deposit: 90,
-            hot: 88,
-            mixer: 86,
-            bridge: 86,
-            destination: 82,
-            wallet: 20
-        })[type] || 10;
-    }
-
     function addNode(address) {
         if (!address) return false;
-        const key = norm(address);
-        if (nodes.has(key)) return true;
+        const raw = String(address);
+        const key = keyOf(raw);
+        if (nodes.has(key)) return false;
         if (nodes.size >= MAX_VISUAL_NODES) return false;
-        const type = inferType(key);
-        const cls = classifications.get(key);
-        const isVasp = matchedSet.has(key) || type === "vasp";
         nodes.add(key);
-        displayAddresses.set(key, String(address));
-        elements.push({
-            data: {
-                id: key,
-                address: String(address),
-                type,
-                label: nodeTypeLabel(type),
-                reason: cls?.reason || nodeReason(type),
-                vaspMatch: isVasp,
-                vaspName: isVasp ? vaspName : ""
-            }
-        });
+        const type = inferType(raw);
+        const cls = classifications.get(key);
+        const isVasp = matchedSet.has(key);
+        elements.push({ data: {
+            id: raw, address: raw, type,
+            label: nodeTypeLabel(type),
+            reason: cls?.reason || nodeReason(type),
+            classification_confidence: cls?.classification_confidence,
+            vaspMatch: isVasp,
+            vaspName: isVasp ? vaspName : ""
+        }});
         return true;
     }
 
-    // IMPORTANT: reserve VASP infrastructure before admitting ordinary wallets.
-    // The previous version filled the 90-node visual budget with wallets first,
-    // so the white VASP node could disappear from the graph.
-    const priorityAddresses = [];
-    priorityAddresses.push(String(startingWallet));
-    matchedSet.forEach(a => priorityAddresses.push(a));
-    (analysisData.node_classification || [])
-        .slice()
-        .sort((a, b) => nodePriority(b.type) - nodePriority(a.type))
-        .forEach(x => priorityAddresses.push(x.address));
+    // Build a compact, connected visual subset. Priority is given to the investigated
+    // wallet, VASP evidence, deposit/hot-wallet evidence and their actual transaction edges.
+    const rawTxs = (transactions || []).filter(tx => tx && tx.from && tx.to).map((tx, index) => ({ tx, index, from: String(tx.from), to: String(tx.to) }));
+    const priority = rawTxs.map(r => {
+        const a = keyOf(r.from), b = keyOf(r.to);
+        let score = 0;
+        if (a === startKey || b === startKey) score += 100;
+        if (matchedSet.has(a) || matchedSet.has(b)) score += 90;
+        if (depositSet.has(a) || depositSet.has(b)) score += 50;
+        if (hotSet.has(a) || hotSet.has(b)) score += 45;
+        if (["mixer", "bridge"].includes(a) || ["mixer", "bridge"].includes(b)) score += 40;
+        return { ...r, score };
+    }).sort((a, b) => b.score - a.score || a.index - b.index);
 
-    Array.from(new Set(priorityAddresses.filter(Boolean))).forEach(addNode);
-
-    // Prefer transaction edges that connect the investigation target or an important
-    // infrastructure node. This keeps the visible graph informative without drawing
-    // hundreds of lines.
-    const txRows = (transactions || [])
-        .map((tx, index) => ({ tx, index }))
-        .filter(({tx}) => tx?.from && tx?.to);
-
-    txRows.sort((a, b) => {
-        const score = ({tx}) => {
-            const s = nodePriority(inferType(tx.from)) + nodePriority(inferType(tx.to));
-            return s + (norm(tx.from) === norm(startingWallet) ? 80 : 0)
-                     + (matchedSet.has(norm(tx.to)) || matchedSet.has(norm(tx.from)) ? 70 : 0);
-        };
-        return score(b) - score(a) || a.index - b.index;
-    });
-
-    let visibleEdgeCount = 0;
-    txRows.forEach(({tx, index}) => {
-        if (visibleEdgeCount >= MAX_VISUAL_EDGES) return;
-        const a = norm(tx.from), b = norm(tx.to);
-        const missing = (nodes.has(a) ? 0 : 1) + (nodes.has(b) ? 0 : 1);
-        if (nodes.size + missing > MAX_VISUAL_NODES) return;
-        addNode(tx.from);
-        addNode(tx.to);
-
-        elements.push({
-            data: {
-                id: tx.tx_hash || `edge-${index}`,
-                source: a,
-                target: b,
-                amount: tx.amount ?? "Unknown",
-                chain: tx.chain || "Unknown",
-                tx_hash: tx.tx_hash || "Unknown",
-                from: a,
-                to: b,
-                edgeType: inferType(b),
-                token: tx.token || "",
-                timestamp: tx.timestamp || ""
-            }
-        });
-        visibleEdgeCount += 1;
-    });
-
-    // Deterministic, investigation-oriented layout:
-    // VASP stays in the middle, important infrastructure sits around it,
-    // and ordinary wallets occupy clean upper/lower rows.
-    const positions = new Map();
-    const mainTypes = new Set(["start", "vasp", "deposit", "hot", "mixer", "bridge", "destination"]);
-    const mainNodes = Array.from(nodes).filter(a => mainTypes.has(inferType(a)));
-    const walletNodes = Array.from(nodes).filter(a => inferType(a) === "wallet");
-
-    const CENTER_X = 620;
-    const CENTER_Y = 285;
-    const MAIN_X = {
-        start: 115,
-        mixer: 330,
-        bridge: 470,
-        vasp: CENTER_X,
-        deposit: 780,
-        hot: 920,
-        destination: 1060
-    };
-
-    const grouped = new Map();
-    mainNodes.forEach(address => {
-        const type = inferType(address);
-        if (!grouped.has(type)) grouped.set(type, []);
-        grouped.get(type).push(address);
-    });
-
-    grouped.forEach((items, type) => {
-        items.sort((a,b) => String(a).localeCompare(String(b)));
-        const x = MAIN_X[type] ?? CENTER_X;
-        const gap = type === "vasp" ? 82 : 72;
-        const startY = CENTER_Y - ((items.length - 1) * gap) / 2;
-        items.forEach((address, i) => {
-            positions.set(address, { x, y: startY + i * gap });
-        });
-    });
-
-    // Wallets are deliberately kept on two clean rails. Their x positions are
-    // evenly distributed so a real-wallet graph remains readable.
-    walletNodes.sort((a,b) => {
-        const da = classifications.get(norm(a)), db = classifications.get(norm(b));
-        return String(da?.address || a).localeCompare(String(db?.address || b));
-    });
-    const top = [], bottom = [];
-    walletNodes.forEach((address, i) => (i % 2 === 0 ? top : bottom).push(address));
-
-    function placeRail(items, y) {
-        if (!items.length) return;
-        const left = 95, right = 1080;
-        const step = items.length === 1 ? 0 : (right - left) / (items.length - 1);
-        items.forEach((address, i) => {
-            positions.set(address, {
-                x: items.length === 1 ? CENTER_X : left + i * step,
-                y
-            });
-        });
+    for (const record of priority) {
+        if (txRecords.length >= MAX_VISUAL_EDGES) break;
+        const aKey = keyOf(record.from), bKey = keyOf(record.to);
+        const need = (nodes.has(aKey) ? 0 : 1) + (nodes.has(bKey) ? 0 : 1);
+        if (nodes.size + need > MAX_VISUAL_NODES) continue;
+        addNode(record.from); addNode(record.to);
+        txRecords.push(record);
     }
-    placeRail(top, 95);
-    placeRail(bottom, 475);
 
-    // Fallback for any node not classified above.
-    let fallbackIndex = 0;
-    nodes.forEach(address => {
-        if (!positions.has(address)) {
-            positions.set(address, {
-                x: 120 + (fallbackIndex % 8) * 135,
-                y: 180 + Math.floor(fallbackIndex / 8) * 70
+    // Always reserve room for VASP infrastructure so it cannot disappear behind the node cap.
+    for (const address of matchedSet) {
+        if (nodes.size >= MAX_VISUAL_NODES) break;
+        addNode(address);
+    }
+
+    txRecords.forEach(({tx, index}) => {
+        const amount = tx.amount ?? tx.value ?? tx.value_eth ?? 0;
+        const chain = tx.chain || tx.network || "Ethereum";
+        const token = tx.token || tx.tokenSymbol || (tx.type === "erc20" ? "ERC20" : "Native");
+        const txHash = tx.tx_hash || tx.hash || `edge-${index}`;
+        elements.push({ data: {
+            id: txHash, source: String(tx.from), target: String(tx.to),
+            amount, chain, tx_hash: txHash, hash: txHash,
+            from: String(tx.from), to: String(tx.to),
+            edgeType: inferType(tx.to), token, tokenSymbol: tx.tokenSymbol || tx.token || "",
+            timestamp: tx.timestamp || tx.timeStamp || "", block: tx.block || tx.blockNumber || ""
+        }});
+    });
+
+    const edgeElements = elements.filter(e => e.data.source && e.data.target);
+    const adjacency = new Map();
+    function link(a, b) {
+        if (!adjacency.has(a)) adjacency.set(a, []);
+        adjacency.get(a).push(b);
+    }
+    edgeElements.forEach(e => { link(keyOf(e.data.source), keyOf(e.data.target)); link(keyOf(e.data.target), keyOf(e.data.source)); });
+
+    // Find the shortest observed path from the investigated wallet to a VASP-labelled
+    // address. If no such path exists, use the deepest observed path from the target.
+    function shortestPath(targetSet) {
+        const queue = [startKey];
+        const prev = new Map([[startKey, null]]);
+        while (queue.length) {
+            const cur = queue.shift();
+            if (targetSet.has(cur)) {
+                const path = [];
+                let p = cur;
+                while (p !== null) { path.unshift(p); p = prev.get(p); }
+                return path;
+            }
+            for (const next of adjacency.get(cur) || []) {
+                if (!prev.has(next)) { prev.set(next, cur); queue.push(next); }
+            }
+        }
+        return [];
+    }
+
+    let mainPath = shortestPath(matchedSet);
+    if (!mainPath.length) {
+        const depth = new Map([[startKey, 0]]), queue = [startKey];
+        let deepest = startKey;
+        while (queue.length) {
+            const cur = queue.shift();
+            if ((depth.get(cur) || 0) > (depth.get(deepest) || 0)) deepest = cur;
+            for (const next of adjacency.get(cur) || []) {
+                if (!depth.has(next)) { depth.set(next, (depth.get(cur) || 0) + 1); queue.push(next); }
+            }
+        }
+        mainPath = shortestPath(new Set([deepest]));
+    }
+    if (!mainPath.length && nodes.has(startKey)) mainPath = [startKey];
+
+    const nodeByKey = new Map(elements.filter(e => e.data.address).map(e => [keyOf(e.data.address), e]));
+    const stageRect = graphEl.getBoundingClientRect();
+    const W = Math.max(700, stageRect.width || 1200);
+    const H = Math.max(500, stageRect.height || 560);
+    const centerY = H * 0.50;
+    const upperY = H * 0.19;
+    const lowerY = H * 0.81;
+    const positions = new Map();
+
+    // Central evidence path: investigated wallet -> observed hops -> VASP evidence.
+    const mainGap = Math.max(92, Math.min(155, (W - 140) / Math.max(1, mainPath.length - 1)));
+    const mainWidth = Math.min(W - 120, mainGap * Math.max(0, mainPath.length - 1));
+    const mainStartX = (W - mainWidth) / 2;
+    mainPath.forEach((key, i) => positions.set(key, { x: mainStartX + i * mainGap, y: centerY }));
+
+    // Every remaining wallet stays on one of two clean rails. Nodes are packed with
+    // guaranteed spacing so they cannot overlap, while actual edges remain intact.
+    const remaining = Array.from(nodes).filter(k => !positions.has(k));
+    const upper = [], lower = [];
+    remaining.forEach((key, i) => (i % 2 === 0 ? upper : lower).push(key));
+    function placeRail(list, y) {
+        if (!list.length) return;
+        const gap = Math.max(62, Math.min(105, (W - 90) / list.length));
+        const total = gap * (list.length - 1);
+        const x0 = Math.max(45, (W - total) / 2);
+        list.forEach((key, i) => positions.set(key, { x: x0 + i * gap, y }));
+    }
+    placeRail(upper, upperY);
+    placeRail(lower, lowerY);
+
+    // VASP must remain central even when public intelligence found it but there is no
+    // direct observed transaction edge to that labelled infrastructure address.
+    const vaspKeys = Array.from(matchedSet).filter(k => nodeByKey.has(k));
+    if (vaspKeys.length) {
+        const centralVasp = vaspKeys[0];
+        positions.set(centralVasp, { x: W * 0.62, y: centerY });
+        if (mainPath.includes(centralVasp)) {
+            const idx = mainPath.indexOf(centralVasp);
+            const left = Math.max(60, W * 0.16);
+            const right = Math.min(W - 60, W * 0.86);
+            const count = Math.max(1, mainPath.length - 1);
+            mainPath.forEach((key, i) => {
+                if (key === centralVasp) return;
+                positions.set(key, { x: left + ((right - left) * i / count), y: centerY });
             });
-            fallbackIndex++;
         }
-    });
-
-    elements.forEach(element => {
-        if (element.data.address) {
-            element.position = positions.get(norm(element.data.address));
-        }
-    });
+    }
+    nodeByKey.forEach((el, key) => { el.position = positions.get(key) || { x: W / 2, y: centerY }; });
 
     const cy = cytoscape({
         container: graphEl,
         elements,
         style: [
-            {
-                selector: "node",
-                style: {
-                    "background-color": COLORS.wallet,
-                    "label": "data(label)",
-                    "color": "#eaf2ff",
-                    "text-valign": "center",
-                    "text-halign": "center",
-                    "font-size": 8,
-                    "font-weight": 700,
-                    "text-wrap": "wrap",
-                    "text-max-width": 78,
-                    "width": 44,
-                    "height": 44,
-                    "border-width": 2,
-                    "border-color": "#41617d",
-                    "opacity": 0.9,
-                    "overlay-opacity": 0
-                }
-            },
-            { selector: 'node[type="start"]', style: { "background-color": COLORS.start, "border-color": "#ffb1c0", "border-width": 4, "width": 58, "height": 58, "opacity": 1 } },
+            { selector: "node", style: { "background-color": COLORS.wallet, "label": "data(label)", "color": "#eaf2ff", "text-valign": "center", "text-halign": "center", "font-size": 8, "font-weight": 700, "width": 42, "height": 42, "border-width": 2, "border-color": "#4c6485", "opacity": 0.9, "overlay-opacity": 0 } },
+            { selector: 'node[type="start"]', style: { "background-color": COLORS.start, "border-color": "#ffb1c0", "border-width": 4, "width": 56, "height": 56, "opacity": 1 } },
             { selector: 'node[type="deposit"]', style: { "background-color": COLORS.deposit, "border-color": "#ffe08a", "border-width": 3, "opacity": 1 } },
             { selector: 'node[type="hot"]', style: { "background-color": COLORS.hot, "border-color": "#8bf0bd", "border-width": 3, "opacity": 1 } },
-            { selector: 'node[type="vasp"]', style: { "background-color": "#f5f8ff", "color": "#08111f", "border-color": "#ffffff", "border-width": 5, "width": 58, "height": 58, "opacity": 1 } },
+            { selector: 'node[type="vasp"]', style: { "background-color": "#ffffff", "color": "#08111f", "border-color": "#ffffff", "border-width": 5, "width": 54, "height": 54, "opacity": 1 } },
             { selector: 'node[type="mixer"]', style: { "background-color": COLORS.mixer, "border-color": "#ffb16f", "border-width": 3, "opacity": 1 } },
             { selector: 'node[type="bridge"]', style: { "background-color": COLORS.bridge, "border-color": "#d2b7ff", "border-width": 3, "opacity": 1 } },
             { selector: 'node[type="destination"]', style: { "background-color": COLORS.destination, "border-color": "#a9dcff", "border-width": 3, "opacity": 1 } },
-
-            // Search highlighting uses direct style changes below instead of
-            // CSS animation, which is much cheaper on dense graphs.
-            { selector: "node.search-hit", style: { "border-width": 7, "border-color": "#ffffff", "overlay-color": "#ffffff", "overlay-opacity": 0.18, "opacity": 1 } },
-            { selector: "edge.search-hit", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } },
             { selector: "node:selected", style: { "border-width": 6, "border-color": "#ffffff", "opacity": 1 } },
-            {
-                selector: "edge",
-                style: {
-                    "width": 1.5,
-                    "line-color": "#3c5875",
-                    "target-arrow-color": "#3c5875",
-                    "target-arrow-shape": "triangle",
-                    "curve-style": "straight",
-                    "opacity": 0.34
-                }
-            },
-            { selector: 'edge[edgeType="deposit"]', style: { "line-color": COLORS.deposit, "target-arrow-color": COLORS.deposit, "opacity": 0.55 } },
-            { selector: 'edge[edgeType="hot"]', style: { "line-color": COLORS.hot, "target-arrow-color": COLORS.hot, "opacity": 0.62 } },
-            { selector: 'edge[edgeType="vasp"]', style: { "line-color": COLORS.vasp, "target-arrow-color": COLORS.vasp, "opacity": 0.72 } },
-            { selector: 'edge[edgeType="mixer"]', style: { "line-color": COLORS.mixer, "target-arrow-color": COLORS.mixer, "opacity": 0.68 } },
-            { selector: 'edge[edgeType="bridge"]', style: { "line-color": COLORS.bridge, "target-arrow-color": COLORS.bridge, "opacity": 0.68 } },
-            { selector: "edge:selected", style: { "width": 4, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } }
+            { selector: "edge", style: { "width": 1.6, "line-color": "#49617f", "target-arrow-color": "#49617f", "target-arrow-shape": "triangle", "curve-style": "straight", "opacity": 0.42, "underlay-color": "#67cfff", "underlay-opacity": 0.035, "underlay-padding": 2 } },
+            { selector: 'edge[edgeType="deposit"]', style: { "line-color": COLORS.deposit, "target-arrow-color": COLORS.deposit, "opacity": 0.7, "underlay-color": COLORS.deposit, "underlay-opacity": 0.08 } },
+            { selector: 'edge[edgeType="hot"]', style: { "line-color": COLORS.hot, "target-arrow-color": COLORS.hot, "opacity": 0.72, "underlay-color": COLORS.hot, "underlay-opacity": 0.08 } },
+            { selector: 'edge[edgeType="vasp"]', style: { "line-color": COLORS.vasp, "target-arrow-color": COLORS.vasp, "opacity": 0.9, "underlay-color": COLORS.vasp, "underlay-opacity": 0.12 } },
+            { selector: 'edge[edgeType="mixer"]', style: { "line-color": COLORS.mixer, "target-arrow-color": COLORS.mixer, "opacity": 0.85 } },
+            { selector: 'edge[edgeType="bridge"]', style: { "line-color": COLORS.bridge, "target-arrow-color": COLORS.bridge, "opacity": 0.85 } },
+            { selector: "edge:selected", style: { "width": 4, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1, "underlay-opacity": 0.18 } },
+            { selector: "node.search-hit", style: { "border-width": 7, "border-color": "#ffffff", "overlay-color": "#ffffff", "overlay-opacity": 0.2, "opacity": 1 } },
+            { selector: "edge.search-hit", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } }
         ],
-        layout: {
-            name: "preset",
-            fit: true,
-            padding: 50
-        },
-        minZoom: 0.45,
-        maxZoom: 2.5,
-        pixelRatio: 1
+        layout: { name: "preset", fit: true, padding: 45 }
     });
 
-    activeGraph = cy;
-    document.getElementById("graphEmpty").classList.toggle("hidden", transactions.length > 0);
-
-    // One tiny canvas animation layer. It follows the real Cytoscape edge
-    // positions, so dragging a node immediately changes the particle path.
+    // One lightweight canvas carries a few moving highlights. It follows the current
+    // rendered edge positions, so highlights react when a node is dragged.
     const motionCanvas = document.createElement("canvas");
     motionCanvas.className = "graph-motion-canvas";
     motionCanvas.setAttribute("aria-hidden", "true");
     graphEl.appendChild(motionCanvas);
-    const motionCtx = motionCanvas.getContext("2d", { alpha: true });
-    const motionEdges = cy.edges().slice(0, Math.min(8, cy.edges().length));
-    const particles = motionEdges.map((edge, index) => ({
-        edge,
-        offset: index / Math.max(1, motionEdges.length),
-        speed: 0.000035 + (index % 3) * 0.000009
-    }));
-
+    const motionCtx = motionCanvas.getContext("2d");
+    const motionEdges = cy.edges().slice(0, 8);
+    const particles = motionEdges.map((edge, index) => ({ edge, offset: index / Math.max(1, motionEdges.length), speed: 0.000045 + (index % 3) * 0.00001 }));
     function resizeMotionCanvas() {
         const rect = graphEl.getBoundingClientRect();
         const dpr = Math.min(window.devicePixelRatio || 1, 1.15);
@@ -505,271 +439,103 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
         motionCanvas.style.height = `${rect.height}px`;
         motionCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-
     function drawMotion(now = performance.now()) {
-        if (!motionCtx) return;
-        if (document.hidden) {
-            graphMotionFrame = null;
-            return;
-        }
+        if (!motionCtx || document.hidden) { graphMotionFrame = null; return; }
         const rect = graphEl.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
-
-        // ~18 FPS is intentional: enough motion to feel alive without
-        // continuously consuming a laptop CPU/GPU core.
-        if (now - graphMotionLast < 55) {
-            graphMotionFrame = requestAnimationFrame(drawMotion);
-            return;
-        }
+        if (now - graphMotionLast < 65) { graphMotionFrame = requestAnimationFrame(drawMotion); return; }
         graphMotionLast = now;
         motionCtx.clearRect(0, 0, rect.width, rect.height);
-
         particles.forEach(p => {
-            if (!p.edge || p.edge.removed()) return;
-            const source = p.edge.source().renderedPosition();
-            const target = p.edge.target().renderedPosition();
+            const source = p.edge.source().renderedPosition(), target = p.edge.target().renderedPosition();
             if (!source || !target) return;
-
             const t = (now * p.speed + p.offset) % 1;
-            const x = source.x + (target.x - source.x) * t;
-            const y = source.y + (target.y - source.y) * t;
-            const dx = target.x - source.x, dy = target.y - source.y;
-            const len = Math.hypot(dx, dy) || 1;
-
-            // Small glow only; no shadow on the whole edge.
-            motionCtx.beginPath();
-            motionCtx.arc(x, y, 2, 0, Math.PI * 2);
-            motionCtx.fillStyle = "rgba(225,248,255,0.95)";
-            motionCtx.fill();
-
-            motionCtx.beginPath();
-            motionCtx.moveTo(x - (dx / len) * 9, y - (dy / len) * 9);
-            motionCtx.lineTo(x, y);
-            motionCtx.lineWidth = 1.4;
-            motionCtx.strokeStyle = "rgba(125,215,255,0.48)";
-            motionCtx.stroke();
+            const x = source.x + (target.x - source.x) * t, y = source.y + (target.y - source.y) * t;
+            motionCtx.beginPath(); motionCtx.arc(x, y, 1.7, 0, Math.PI * 2);
+            motionCtx.fillStyle = "rgba(225,248,255,0.9)"; motionCtx.shadowBlur = 6; motionCtx.shadowColor = "rgba(110,220,255,0.75)"; motionCtx.fill(); motionCtx.shadowBlur = 0;
         });
-
         graphMotionFrame = requestAnimationFrame(drawMotion);
     }
-
     resizeMotionCanvas();
     cy.on("resize", resizeMotionCanvas);
-    cy.on("zoom pan", () => {
-        if (!graphMotionFrame) graphMotionFrame = requestAnimationFrame(drawMotion);
-    });
+    cy.on("zoom pan drag free position", () => { if (!graphMotionFrame && !document.hidden) graphMotionFrame = requestAnimationFrame(drawMotion); });
     graphMotionFrame = requestAnimationFrame(drawMotion);
+    activeGraph = cy;
+    document.getElementById("graphEmpty").classList.toggle("hidden", transactions.length > 0);
 
     function showPopup(title, rows, element) {
         popupContent.innerHTML = "";
-        const kicker = document.createElement("div");
-        kicker.className = "popup-kicker";
-        kicker.textContent = title;
+        const kicker = document.createElement("div"); kicker.className = "popup-kicker"; kicker.textContent = title;
         popupContent.appendChild(kicker);
         rows.forEach(row => {
-            const div = document.createElement("div");
-            div.className = "popup-row";
-            div.innerHTML = `<strong>${escapeHtml(row.label)}</strong><span>${escapeHtml(String(row.value ?? "Unknown"))}</span>`;
+            const div = document.createElement("div"); div.className = "popup-row";
+            const value = row.value === undefined || row.value === null || row.value === "" ? "Not available in source data" : row.value;
+            div.innerHTML = `<strong>${escapeHtml(row.label)}</strong><span>${escapeHtml(String(value))}</span>`;
             popupContent.appendChild(div);
         });
-        cy.elements().unselect();
-        element.select();
-        popup.classList.remove("hidden");
+        cy.elements().unselect(); element.select(); popup.classList.remove("hidden");
     }
-
-    function closePopup() {
-        popup.classList.add("hidden");
-        cy.elements().unselect();
-    }
-
+    function closePopup() { popup.classList.add("hidden"); cy.elements().unselect(); }
     cy.on("tap", "node", event => {
         const n = event.target, d = n.data();
-        showPopup("WALLET / ENTITY", [
-            ["Type", nodeTypeLabel(d.type)],
-            ["Address", d.address],
-            ["VASP", d.vaspMatch ? d.vaspName : "—"],
-            ["Incoming", n.incomers("edge").length],
-            ["Outgoing", n.outgoers("edge").length],
-            ["Why classified", d.reason || "Observed address"]
-        ], n);
+        showPopup(d.type === "vasp" ? "VASP INFRASTRUCTURE" : "WALLET / ENTITY", [
+            ["Type", nodeTypeLabel(d.type)], ["Address", d.address], ["VASP", d.vaspMatch ? d.vaspName : "Not a VASP match"],
+            ["Incoming", n.incomers("edge").length], ["Outgoing", n.outgoers("edge").length], ["Classification", d.reason],
+            ["Classification confidence", d.classification_confidence === undefined ? "Not scored" : `${Math.round(Number(d.classification_confidence) * 100)}%`]
+        ].map(([label, value]) => ({label, value})), n);
     });
-
     cy.on("tap", "edge", event => {
         const e = event.target, d = e.data();
         showPopup("TRANSACTION EVIDENCE", [
-            ["TX Hash", d.tx_hash],
-            ["From", d.from],
-            ["To", d.to],
-            ["Amount", d.amount],
-            ["Chain", d.chain],
-            ["Token", d.token || "Native"],
-            ["Block / Time", d.timestamp || "Not supplied"]
-        ], e);
+            ["TX Hash", d.tx_hash || d.hash], ["From", d.from || e.source().data("address")], ["To", d.to || e.target().data("address")],
+            ["Amount", d.amount], ["Chain", d.chain], ["Token", d.token || d.tokenSymbol || "Native"],
+            ["Block", d.block], ["Time", d.timestamp ? new Date(Number(d.timestamp) * 1000).toLocaleString() : "Not supplied"]
+        ].map(([label, value]) => ({label, value})), e);
     });
-
     cy.on("tap", event => { if (event.target === cy) closePopup(); });
     popupClose.onclick = closePopup;
 
     function clearGraphSearch() {
-        if (graphSearchPulse) {
-            clearInterval(graphSearchPulse);
-            graphSearchPulse = null;
-        }
-        cy.elements().removeClass("search-hit");
-        cy.elements().removeStyle();
-        const input = document.getElementById("graphSearchInput");
-        const clear = document.getElementById("graphSearchClear");
-        const count = document.getElementById("graphSearchCount");
-        if (input) input.value = "";
-        if (clear) clear.classList.add("hidden");
-        if (count) {
-            count.textContent = "";
-            count.className = "graph-search-count";
-        }
+        if (graphSearchPulse) { clearInterval(graphSearchPulse); graphSearchPulse = null; }
+        cy.elements().removeClass("search-hit").removeStyle("opacity");
+        const input = document.getElementById("graphSearchInput"), clear = document.getElementById("graphSearchClear"), count = document.getElementById("graphSearchCount");
+        if (input) input.value = ""; if (clear) clear.classList.add("hidden"); if (count) { count.textContent = ""; count.className = "graph-search-count"; }
     }
-
     function runGraphSearch() {
-        const input = document.getElementById("graphSearchInput");
-        const clear = document.getElementById("graphSearchClear");
-        const count = document.getElementById("graphSearchCount");
+        const input = document.getElementById("graphSearchInput"), clear = document.getElementById("graphSearchClear"), count = document.getElementById("graphSearchCount");
         const term = (input?.value || "").trim().toLowerCase();
-
-        if (graphSearchPulse) {
-            clearInterval(graphSearchPulse);
-            graphSearchPulse = null;
-        }
-        cy.elements().removeClass("search-hit");
-        cy.elements().removeStyle();
-
-        if (!term) {
-            if (clear) clear.classList.add("hidden");
-            if (count) {
-                count.textContent = "";
-                count.className = "graph-search-count";
-            }
-            return;
-        }
+        clearGraphSearch();
+        if (!term) return;
         if (clear) clear.classList.remove("hidden");
-
-        const aliases = {
-            vasp: ["vasp"],
-            exchange: ["vasp"],
-            hot: ["hot"],
-            "hot wallet": ["hot"],
-            hotwallet: ["hot"],
-            deposit: ["deposit"],
-            wallet: ["wallet"],
-            investigated: ["start"],
-            start: ["start"],
-            mixer: ["mixer"],
-            bridge: ["bridge"],
-            destination: ["destination"]
-        };
-        const types = aliases[term] || [];
-
+        const aliases = { vasp:"vasp", exchange:"vasp", "hot wallet":"hot", hot:"hot", hotwallet:"hot", deposit:"deposit", wallet:"wallet", investigated:"start", start:"start", mixer:"mixer", bridge:"bridge", destination:"destination" };
+        const wantedType = aliases[term];
         const matches = cy.nodes().filter(n => {
             const d = n.data();
-            const text = [
-                d.type, nodeTypeLabel(d.type), d.address, d.reason, d.vaspName
-            ].join(" ").toLowerCase();
-            return types.length ? types.includes(String(d.type).toLowerCase()) : text.includes(term);
+            const haystack = [d.type, nodeTypeLabel(d.type), d.address, d.reason, d.vaspName].join(" ").toLowerCase();
+            return wantedType ? d.type === wantedType : haystack.includes(term);
         });
-
-        const edgeMatches = cy.edges().filter(e => {
-            const d = e.data();
-            return [
-                d.tx_hash, d.from, d.to, d.amount, d.chain, d.token,
-                d.edgeType, nodeTypeLabel(d.edgeType)
-            ].join(" ").toLowerCase().includes(term);
-        });
-
-        const matchedElements = matches.union(edgeMatches);
-
-        if (!matchedElements.length) {
-            if (count) {
-                count.textContent = "No match";
-                count.className = "graph-search-count none";
-            }
-            return;
-        }
-
-        matchedElements.addClass("search-hit");
-        cy.elements().not(matchedElements).style("opacity", 0.12);
-        matchedElements.style("opacity", 1);
-        if (count) {
-            count.textContent = `${matchedElements.length} match${matchedElements.length === 1 ? "" : "es"}`;
-            count.className = "graph-search-count match";
-        }
-
-        // Cheap deterministic blinking: only the already matched elements change.
+        const edgeMatches = cy.edges().filter(e => ["tx_hash","hash","from","to","amount","chain","token","block","timestamp","edgeType"].map(k => e.data(k)).join(" ").toLowerCase().includes(term));
+        const hits = matches.union(edgeMatches);
+        if (!hits.length) { if (count) { count.textContent = "No match"; count.className = "graph-search-count none"; } return; }
+        hits.addClass("search-hit"); cy.elements().not(hits).style("opacity", 0.13);
+        if (count) { count.textContent = `${hits.length} match${hits.length === 1 ? "" : "es"}`; count.className = "graph-search-count match"; }
+        cy.fit(hits, 100);
         let on = true;
-        graphSearchPulse = setInterval(() => {
-            on = !on;
-            if (on) {
-                matches.style({
-                    "border-width": 7,
-                    "border-color": "#ffffff",
-                    "overlay-opacity": 0.18
-                });
-                edgeMatches.style({
-                    "width": 5,
-                    "line-color": "#ffffff",
-                    "target-arrow-color": "#ffffff"
-                });
-            } else {
-                matches.style({
-                    "border-width": 3,
-                    "border-color": "#9fdfff",
-                    "overlay-opacity": 0.02
-                });
-                edgeMatches.style({
-                    "width": 2,
-                    "opacity": 0.72
-                });
-            }
-        }, 500);
-
-        cy.animate({ fit: { eles: matchedElements, padding: 90 }, duration: 280 });
+        graphSearchPulse = setInterval(() => { on = !on; hits.style("opacity", on ? 1 : 0.65); }, 500);
     }
-
-    const searchInput = document.getElementById("graphSearchInput");
-    const searchButton = document.getElementById("graphSearchBtn");
-    const searchClear = document.getElementById("graphSearchClear");
+    const searchInput = document.getElementById("graphSearchInput"), searchButton = document.getElementById("graphSearchBtn"), searchClear = document.getElementById("graphSearchClear");
     if (searchButton) searchButton.onclick = runGraphSearch;
-    if (searchInput) {
-        searchInput.oninput = () => {
-            if (!searchInput.value.trim()) clearGraphSearch();
-        };
-        searchInput.onkeydown = event => {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                runGraphSearch();
-            } else if (event.key === "Escape") {
-                clearGraphSearch();
-            }
-        };
-    }
+    if (searchInput) searchInput.onkeydown = event => { if (event.key === "Enter") runGraphSearch(); if (event.key === "Escape") clearGraphSearch(); };
     if (searchClear) searchClear.onclick = clearGraphSearch;
 
-    // No continuous physics simulation here. The graph is deterministic and
-    // readable; Cytoscape still updates every edge geometrically when a node
-    // is dragged, so lines naturally stretch and follow the node.
-    cy.on("dragfree", "node", event => {
-        const node = event.target;
-        node.connectedEdges().style("opacity", 0.72);
-        setTimeout(() => {
-            if (!node.removed()) node.connectedEdges().removeStyle("opacity");
-        }, 180);
-    });
-
-    setTimeout(() => {
-        cy.resize();
-        cy.fit(undefined, 50);
-    }, 80);
+    setTimeout(() => { if (activeGraph && !activeGraph.destroyed()) cy.fit(undefined, 45); }, 50);
 }
 
 function fitGraph() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.fit(undefined, 55); } }
-function resetGraphView() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.fit(undefined, 50); } }
+function resetGraphView() {
+    if (!activeGraph || activeGraph.destroyed()) return;
+    activeGraph.fit(undefined, 45);
+}
 
 async function toggleGraphFullscreen() {
     const stage = document.getElementById("graphStage");
