@@ -2,6 +2,8 @@ let investigationData = null;
 let activeGraph = null;
 let flowOverlayFrame = null;
 let graphSearchPulse = null;
+let graphMotionFrame = null;
+let graphMotionLast = 0;
 
 const scenarios = {
     normal: { wallet: "0xABC" },
@@ -200,6 +202,8 @@ function renderQuality(data) {
 }
 
 function drawGraph(transactions, startingWallet, analysisData = {}) {
+    if (graphMotionFrame) { cancelAnimationFrame(graphMotionFrame); graphMotionFrame = null; }
+    graphMotionLast = 0;
     if (activeGraph) activeGraph.destroy();
     const graphEl = document.getElementById("graph");
     const popup = document.getElementById("graphPopup");
@@ -284,10 +288,91 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
             { selector: 'edge[edgeType="bridge"]', style: { "line-color": COLORS.bridge, "target-arrow-color": COLORS.bridge, "opacity": 0.8 } },
             { selector: "edge:selected", style: { "width": 5, "line-color": "#ffffff", "target-arrow-color": "#ffffff", "opacity": 1 } }
         ],
-        layout: { name: "breadthfirst", directed: true, padding: 35, spacingFactor: 1.15, animate: false }
+        layout: {
+            name: "cose",
+            directed: true,
+            padding: 45,
+            animate: true,
+            animationDuration: 650,
+            randomize: false,
+            fit: true,
+            nodeRepulsion: 7000,
+            idealEdgeLength: 105,
+            edgeElasticity: 0.28,
+            nestingFactor: 0.8,
+            gravity: 0.35,
+            numIter: 120,
+            initialEnergyOnIncremental: 0.4
+        }
     });
 
     cy.nodes().forEach(node => node.data("label", nodeTypeLabel(node.data("type"))));
+
+    // Lightweight animated flow: one canvas, a small capped number of particles,
+    // and throttled rendering. This keeps the graph visually alive without
+    // creating an SVG animation for every transaction edge.
+    const motionCanvas = document.createElement("canvas");
+    motionCanvas.className = "graph-motion-canvas";
+    motionCanvas.setAttribute("aria-hidden", "true");
+    graphEl.appendChild(motionCanvas);
+    const motionCtx = motionCanvas.getContext("2d");
+    const motionEdges = cy.edges().slice(0, 18);
+    const particles = motionEdges.map((edge, index) => ({
+        edge,
+        offset: (index / Math.max(1, motionEdges.length)) * 0.9,
+        speed: 0.000055 + (index % 4) * 0.000012
+    }));
+
+    function resizeMotionCanvas() {
+        const rect = graphEl.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+        motionCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
+        motionCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+        motionCanvas.style.width = `${rect.width}px`;
+        motionCanvas.style.height = `${rect.height}px`;
+        motionCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function drawMotion(now = performance.now()) {
+        if (!motionCtx) return;
+        const rect = graphEl.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        if (now - graphMotionLast < 40) {
+            graphMotionFrame = requestAnimationFrame(drawMotion);
+            return;
+        }
+        graphMotionLast = now;
+        motionCtx.clearRect(0, 0, rect.width, rect.height);
+        if (document.hidden) {
+            graphMotionFrame = null;
+            return;
+        }
+
+        particles.forEach(p => {
+            const source = p.edge.source().renderedPosition();
+            const target = p.edge.target().renderedPosition();
+            if (!source || !target) return;
+            const t = ((now * p.speed + p.offset) % 1);
+            const x = source.x + (target.x - source.x) * t;
+            const y = source.y + (target.y - source.y) * t;
+
+            motionCtx.beginPath();
+            motionCtx.arc(x, y, 2.1, 0, Math.PI * 2);
+            motionCtx.fillStyle = "rgba(220,245,255,0.95)";
+            motionCtx.shadowBlur = 8;
+            motionCtx.shadowColor = "rgba(110,220,255,0.9)";
+            motionCtx.fill();
+            motionCtx.shadowBlur = 0;
+        });
+        graphMotionFrame = requestAnimationFrame(drawMotion);
+    }
+
+    resizeMotionCanvas();
+    cy.on("resize", resizeMotionCanvas);
+    cy.on("zoom pan", () => {
+        if (!graphMotionFrame) graphMotionFrame = requestAnimationFrame(drawMotion);
+    });
+    graphMotionFrame = requestAnimationFrame(drawMotion);
     activeGraph = cy;
     document.getElementById("graphEmpty").classList.toggle("hidden", transactions.length > 0);
 
@@ -394,7 +479,7 @@ function drawGraph(transactions, startingWallet, analysisData = {}) {
 }
 
 function fitGraph() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.fit(undefined, 55); } }
-function resetGraphView() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.layout({name: "breadthfirst", directed: true, padding: 35, spacingFactor: 1.15, animate: false}).run(); setTimeout(fitGraph, 100); } }
+function resetGraphView() { if (activeGraph && !activeGraph.destroyed()) { activeGraph.layout({name: "cose", directed: true, padding: 45, animate: true, animationDuration: 500, randomize: false, nodeRepulsion: 7000, idealEdgeLength: 105, edgeElasticity: 0.28, gravity: 0.35, numIter: 90}).run(); setTimeout(fitGraph, 100); } }
 
 async function toggleGraphFullscreen() {
     const stage = document.getElementById("graphStage");
